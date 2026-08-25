@@ -16,6 +16,10 @@ Item {
   property string stateDir: ""
   property int newPerDay: 20
 
+  // Restrict the session to cards carrying any of these tags. Empty means the
+  // whole deck.
+  property var tags: []
+
   // False whenever the panel is closed, so a session neither ticks nor holds
   // a card revealed while nobody is looking at it.
   property bool active: false
@@ -34,7 +38,8 @@ Item {
   property real answerFontSize: Style.font.subtitle
 
   // ----------------------------------------------------------------- state
-  property var cards: []
+  property var deck: []
+  readonly property var cards: Anki.filterByTags(root.deck, root.tags)
   property var progress: Anki.emptyProgress()
   property var queue: []
   property string deckError: ""
@@ -66,6 +71,11 @@ Item {
     return "done"
   }
 
+  // Re-evaluated as `now` ticks, so an idle session counts down rather than
+  // showing whatever the gap was when the last card was answered.
+  readonly property string untilNext:
+      root.stats.nextDue ? Anki.formatInterval(root.stats.nextDue - root.now) : ""
+
   readonly property var preview: root.current
       ? Anki.previewIntervals(root.currentState, root.now)
       : ({ again: "", hard: "", good: "", easy: "" })
@@ -85,6 +95,7 @@ Item {
   }
 
   onDeckPathChanged: if (root.loaded) root.reload()
+  onTagsChanged: if (root.loaded) root.rebuild()
 
   function cardById(id) {
     if (!id) return null
@@ -171,11 +182,11 @@ Item {
         // An absent deck is the first-run state, not an error; a deck that
         // exists but does not parse is one the user needs told about.
         if (!text.trim()) {
-          root.cards = []
+          root.deck = []
           root.deckError = ""
         } else {
           var parsed = Anki.parseDeck(text)
-          root.cards = parsed.cards
+          root.deck = parsed.cards
           root.deckError = parsed.error
         }
         root.deckRead = true
@@ -338,13 +349,25 @@ Item {
       text: {
         if (root.phase === "loading") return "Loading deck…"
         if (root.phase === "error") return root.deckError + "\n" + root.deckPath
-        if (root.phase === "empty") return "No cards yet.\nAdd some to " + root.deckPath
+
+        // An empty session means one of two different things, and sending
+        // someone to edit a deck that is actually full would be a wild goose
+        // chase.
+        if (root.phase === "empty") {
+          return root.deck.length
+              ? "No cards match #" + Anki.normalizeTags(root.tags).join(" #") + ".\n"
+                + root.deck.length + " card" + (root.deck.length === 1 ? "" : "s") + " in the deck."
+              : "No cards yet.\nAdd some to " + root.deckPath
+        }
+
         if (root.phase === "waiting") return "Nothing due right now.\n"
             + root.stats.waiting + " card" + (root.stats.waiting === 1 ? "" : "s")
-            + " still learning — check back shortly."
-        return root.answered > 0
+            + " still learning — next in " + root.untilNext + "."
+
+        var done = root.answered > 0
             ? "Done for now — " + root.answered + " reviewed."
-            : "Nothing due. Come back later."
+            : "Nothing due."
+        return root.stats.nextDue ? done + "\nNext card in " + root.untilNext + "." : done
       }
     }
   }

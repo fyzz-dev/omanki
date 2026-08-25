@@ -40,6 +40,7 @@ Item {
 
   readonly property string deckPath: Anki.resolveDeck(root.pluginSettings.deck, Quickshell.env("HOME"))
   readonly property int newPerDay: Anki.sanePerDay(root.pluginSettings.newPerDay)
+  readonly property var tags: Anki.normalizeTags(root.pluginSettings.tags)
 
   // Wide enough to read a sentence without becoming a wall of text, and capped
   // so it does not stretch across an ultrawide.
@@ -205,14 +206,7 @@ Item {
 
           PanelSectionHeader {
             width: parent.width
-            text: {
-              if (reviewer.phase !== "reviewing") return "SESSION"
-              var s = reviewer.currentState
-              if (s.phase === "new") return "NEW"
-              if (s.phase === "learning") return "LEARNING"
-              if (s.phase === "relearning") return "RELEARNING  ·  " + s.lapses + " lapse" + (s.lapses === 1 ? "" : "s")
-              return "REVIEW  ·  " + Anki.formatInterval(s.interval) + "  ·  ease " + (s.ease / 1000).toFixed(2)
-            }
+            text: Anki.sectionLabel(reviewer.phase, reviewer.currentState, root.tags)
             foreground: root.foreground
             fontFamily: root.fontFamily
           }
@@ -223,6 +217,7 @@ Item {
             deckPath: root.deckPath
             stateDir: Quickshell.env("HOME") + "/.local/state/omarchy"
             newPerDay: root.newPerDay
+            tags: root.tags
             active: root.opened
             foreground: root.foreground
             accent: Color.accent

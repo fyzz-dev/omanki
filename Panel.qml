@@ -17,6 +17,7 @@ Panel {
   // the Panel base is all the config plumbing this surface needs.
   readonly property string deckPath: Anki.resolveDeck(root.setting("deck", ""), Quickshell.env("HOME"))
   readonly property int newPerDay: Anki.sanePerDay(root.setting("newPerDay", 20))
+  readonly property var tags: Anki.normalizeTags(root.setting("tags", []))
   // The count is the point of the widget, but a bar that has to stay narrow
   // can turn it off and keep the glyph.
   readonly property bool showCount: root.setting("showCount", true) !== false
@@ -142,14 +143,7 @@ Panel {
 
         PanelSectionHeader {
           width: parent.width
-          text: {
-            if (reviewer.phase !== "reviewing") return "SESSION"
-            var s = reviewer.currentState
-            if (s.phase === "new") return "NEW"
-            if (s.phase === "learning") return "LEARNING"
-            if (s.phase === "relearning") return "RELEARNING  ·  " + s.lapses + " lapse" + (s.lapses === 1 ? "" : "s")
-            return "REVIEW  ·  " + Anki.formatInterval(s.interval) + "  ·  ease " + (s.ease / 1000).toFixed(2)
-          }
+          text: Anki.sectionLabel(reviewer.phase, reviewer.currentState, root.tags)
           foreground: root.foreground
           fontFamily: root.fontFamily
         }
@@ -160,6 +154,7 @@ Panel {
           deckPath: root.deckPath
           stateDir: Quickshell.env("HOME") + "/.local/state/omarchy"
           newPerDay: root.newPerDay
+          tags: root.tags
           active: root.opened
           foreground: root.foreground
           accent: Color.accent

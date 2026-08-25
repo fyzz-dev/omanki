@@ -22,7 +22,7 @@ const EXPORTS = [
   "newState", "normalizeState", "grade", "previewIntervals", "formatInterval",
   "dayKey", "hashId", "parseDeck", "emptyProgress", "parseProgress", "rollDay",
   "stateFor", "buildQueue", "counts", "serializeProgress", "findEntry",
-  "resolveDeck", "sanePerDay",
+  "resolveDeck", "sanePerDay", "normalizeTags", "filterByTags", "sectionLabel",
   "READ_SH", "WRITE_SH",
 ]
 const G = {}
@@ -175,6 +175,47 @@ group("deck parsing")
     G.parseDeck('[{"front":"a","back":"1"}]').cards[0].id !==
     G.parseDeck('[{"front":"A","back":"1"}]').cards[0].id)
   t("an explicit id wins", G.parseDeck('[{"id":"mine","front":"a","back":"1"}]').cards[0].id === "mine")
+}
+
+group("tag filtering")
+{
+  const deck = G.parseDeck(JSON.stringify([
+    { front: "a", back: "1", tags: ["omarchy", "cli"] },
+    { front: "b", back: "2", tags: ["Spanish"] },
+    { front: "c", back: "3" },
+    { front: "d", back: "4", tags: ["cli"] },
+  ])).cards
+
+  t("no filter keeps the whole deck", G.filterByTags(deck, []).length === 4)
+  t("an absent filter keeps the whole deck", G.filterByTags(deck, undefined).length === 4)
+  t("a filter keeps only matching cards", G.filterByTags(deck, ["cli"]).map(c => c.front).join("") === "ad")
+  t("an untagged card is excluded by any filter", !G.filterByTags(deck, ["cli"]).some(c => c.front === "c"))
+  t("several tags are a union, not an intersection",
+    G.filterByTags(deck, ["omarchy", "spanish"]).map(c => c.front).join("") === "ab")
+  t("matching ignores case on both sides", G.filterByTags(deck, ["SPANISH"]).length === 1)
+  t("a bare string works like a one-element list", G.filterByTags(deck, "cli").length === 2)
+  t("a filter matching nothing yields nothing", G.filterByTags(deck, ["nope"]).length === 0)
+  t("filtering does not mutate the deck", deck.length === 4)
+
+  t("tags are lowercased and de-duplicated",
+    G.normalizeTags(["CLI", "cli", " Cli "]).join(",") === "cli")
+  t("empty entries are dropped", G.normalizeTags(["", "  ", "a"]).join(",") === "a")
+  t("null is an empty filter", G.normalizeTags(null).length === 0)
+}
+
+group("the section label")
+{
+  const review = { phase: "review", due: NOW, interval: 10 * DAY, ease: 2500, reps: 5, lapses: 0, step: 0 }
+  t("a new card", G.sectionLabel("reviewing", { phase: "new" }, []) === "NEW")
+  t("not reviewing", G.sectionLabel("done", { phase: "new" }, []) === "SESSION")
+  t("a review card shows interval and ease",
+    G.sectionLabel("reviewing", review, []) === "REVIEW  ·  10d  ·  ease 2.50")
+  t("a lapsed card counts its lapses",
+    G.sectionLabel("reviewing", { phase: "relearning", lapses: 1 }, []).indexOf("1 lapse") !== -1)
+  t("plural lapses",
+    G.sectionLabel("reviewing", { phase: "relearning", lapses: 3 }, []).indexOf("3 lapses") !== -1)
+  t("an active filter is shown", G.sectionLabel("reviewing", { phase: "new" }, ["cli"]) === "NEW  ·  #cli")
+  t("no filter adds nothing", G.sectionLabel("reviewing", { phase: "new" }, []).indexOf("#") === -1)
 }
 
 group("the queue")

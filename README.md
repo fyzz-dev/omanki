@@ -80,10 +80,21 @@ hot-reloads on save.
 | `deck` | `~/.local/share/omanki/cards.json` | Path to the deck file. `~` is expanded. |
 | `newPerDay` | `20` | How many unseen cards to introduce per study day. `0` reviews only. |
 | `showCount` | `true` | Show the waiting count next to the bar glyph. |
+| `tags` | *(none)* | Restrict the session to cards carrying any of these tags. |
 
 ```json
-{ "id": "yamz8.omanki", "newPerDay": 10, "deck": "~/notes/spanish.json" }
+{ "id": "yamz8.omanki", "newPerDay": 10, "deck": "~/notes/spanish.json", "tags": ["verbs"] }
 ```
+
+`tags` takes a list or a bare string, matches case-insensitively, and is a
+union rather than an intersection — `["verbs", "food"]` keeps a card carrying
+either. An untagged card is excluded whenever a filter is set. Both surfaces
+share the filter and show it in the header (`NEW · #verbs`), so a short session
+is never mistaken for an empty deck.
+
+Note that settings are read when the shell builds the widget: adding a key to
+an existing entry did not take effect here until `omarchy restart shell`, even
+though layout changes hot-reload.
 
 ## How the scheduling works
 

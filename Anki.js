@@ -299,6 +299,58 @@ function parseDeck(raw) {
   return { cards: cards, error: "" }
 }
 
+// A tag is written twice — once in the deck, once in shell.json — and those
+// two are typed months apart, so matching ignores case and duplicates.
+function normalizeTags(wanted) {
+  var out = []
+  if (wanted === undefined || wanted === null) return out
+
+  var list = Array.isArray(wanted) ? wanted : [wanted]
+  for (var i = 0; i < list.length; i++) {
+    var t = text(list[i]).toLowerCase()
+    if (t && out.indexOf(t) === -1) out.push(t)
+  }
+  return out
+}
+
+// Narrowing a session to part of a deck is what makes a card's tags worth
+// carrying. No filter means the whole deck; with one, a card is kept if it
+// carries any of the wanted tags, so ["omarchy", "spanish"] is a union rather
+// than a card needing both.
+function filterByTags(cards, wanted) {
+  var want = normalizeTags(wanted)
+  if (!want.length) return cards || []
+
+  var kept = []
+  var list = cards || []
+  for (var i = 0; i < list.length; i++) {
+    var tags = list[i].tags || []
+    for (var j = 0; j < tags.length; j++) {
+      if (want.indexOf(text(tags[j]).toLowerCase()) !== -1) {
+        kept.push(list[i])
+        break
+      }
+    }
+  }
+  return kept
+}
+
+// The one-line state summary above the card. Both surfaces render it, so it is
+// written once here rather than twice in QML.
+function sectionLabel(phase, state, tags) {
+  var head
+  if (phase !== "reviewing") head = "SESSION"
+  else if (state.phase === "new") head = "NEW"
+  else if (state.phase === "learning") head = "LEARNING"
+  else if (state.phase === "relearning")
+    head = "RELEARNING  ·  " + state.lapses + " lapse" + (state.lapses === 1 ? "" : "s")
+  else
+    head = "REVIEW  ·  " + formatInterval(state.interval) + "  ·  ease " + (state.ease / 1000).toFixed(2)
+
+  var want = normalizeTags(tags)
+  return want.length ? head + "  ·  #" + want.join(" #") : head
+}
+
 function emptyProgress() {
   return { day: "", introduced: 0, reviews: {} }
 }
