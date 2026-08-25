@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "yamz8.omanki",
+  "name": "omanki",
+  "version": "1.1.0",
+  "author": "yamz8",
+  "description": "Spaced-repetition flashcards in the bar",
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Omanki.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "omanki",
+    "description": "Review flashcards without leaving the bar",
+    "category": "Plugin",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}

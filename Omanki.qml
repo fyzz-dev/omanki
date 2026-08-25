@@ -1,0 +1,264 @@
+import Quickshell
+import Quickshell.Wayland
+import QtQuick
+import qs.Commons
+import qs.Ui
+import "Anki.js" as Anki
+
+// Fullscreen overlay surface, summoned by keybind. The session lives in
+// Reviewer; this file is the card around it, styled with the same menu tokens
+// and panel primitives the built-in overlays use.
+//
+// This is the surface for actually sitting down to a deck — the bar panel is
+// for clearing a few cards in passing. They share the session implementation
+// and the progress file, so a card answered in one is answered in both.
+Item {
+  id: root
+
+  property var shell: null
+  property var manifest: null
+
+  property bool opened: false
+
+  property string fontFamily: Style.font.menuFamily
+  property color background: Color.menu.background
+  property color foreground: Color.menu.text
+  property color border: Color.menu.border
+  property color scrim: Color.menu.scrim
+  property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
+  readonly property int cornerRadius: Style.cornerRadius
+  readonly property int contentMargin: Style.spacing.panelPadding
+
+  readonly property string pluginId: (root.manifest && root.manifest.id) || "yamz8.omanki"
+
+  // ------------------------------------------------------------- settings
+  // Overlays are not handed a `settings` object the way bar widgets are, so
+  // find our own entry in shell.json. It is a live property, so editing the
+  // file re-evaluates this without a restart.
+  readonly property var pluginSettings: Anki.findEntry(
+    root.shell ? root.shell.shellConfig : null, root.pluginId)
+
+  readonly property string deckPath: Anki.resolveDeck(root.pluginSettings.deck, Quickshell.env("HOME"))
+  readonly property int newPerDay: Anki.sanePerDay(root.pluginSettings.newPerDay)
+
+  // Wide enough to read a sentence without becoming a wall of text, and capped
+  // so it does not stretch across an ultrawide.
+  readonly property int cardWidth: Math.min(Style.space(620), Math.round(panel.width * 0.62))
+
+  // A floor rather than a fixed height: cards vary in length, and a face that
+  // resized on every answer would make the grade buttons move under the cursor
+  // mid-session.
+  readonly property int faceHeight: Math.max(Style.space(180), Math.round(panel.height * 0.22))
+
+  // ------------------------------------------------------- plugin contract
+  function open(payloadJson) {
+    var payload = ({})
+    try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
+    if (payload.fontFamily) root.fontFamily = payload.fontFamily
+
+    root.opened = true
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function close() {
+    root.opened = false
+  }
+
+  function dismiss() {
+    root.close()
+    if (root.shell && typeof root.shell.hide === "function")
+      root.shell.hide(root.pluginId)
+  }
+
+  function toggle() {
+    if (root.opened) root.dismiss()
+    else root.open("{}")
+  }
+
+  PanelWindow {
+    id: panel
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "yamz8-omanki"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore
+
+    Rectangle {
+      anchors.fill: parent
+      color: root.scrim
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      onClicked: root.dismiss()
+    }
+
+    BorderSurface {
+      id: card
+      width: root.cardWidth
+      height: column.implicitHeight + root.contentMargin * 2
+      radius: root.cornerRadius
+      anchors.centerIn: parent
+      color: root.background
+      borderSpec: root.borderSpec
+      padding: root.contentMargin
+
+      // Swallow clicks on the card so they do not reach the dismiss handler.
+      MouseArea { anchors.fill: parent; onClicked: {} }
+
+      Item {
+        id: keyCatcher
+        anchors.fill: parent
+        focus: true
+
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+          switch (event.key) {
+            case Qt.Key_Escape:
+              root.dismiss(); event.accepted = true; return
+            case Qt.Key_Space:
+            case Qt.Key_Return:
+            case Qt.Key_Enter:
+              // Reveal, then grade Good — the same two presses Anki trains
+              // into your hands.
+              reviewer.activate(); event.accepted = true; return
+          }
+
+          var k = event.text ? event.text.toLowerCase() : ""
+          if (k === "1") reviewer.answer("again")
+          else if (k === "2") reviewer.answer("hard")
+          else if (k === "3") reviewer.answer("good")
+          else if (k === "4") reviewer.answer("easy")
+          else if (k === "r") reviewer.reload()
+          else return
+          event.accepted = true
+        }
+      }
+
+      Item {
+        anchors.fill: parent
+        anchors.topMargin: card.contentTopInset
+        anchors.rightMargin: card.contentRightInset
+        anchors.bottomMargin: card.contentBottomInset
+        anchors.leftMargin: card.contentLeftInset
+
+        Column {
+          id: column
+          width: parent.width
+          spacing: Style.space(14)
+
+          PanelHero {
+            width: parent.width
+            title: "omanki"
+            meta: {
+              if (reviewer.phase === "loading") return "Loading"
+              if (reviewer.phase === "error") return "Deck error"
+              if (reviewer.phase === "empty") return "Empty deck"
+              var s = reviewer.stats
+              if (!s.pending) return s.total + " card" + (s.total === 1 ? "" : "s") + "  ·  all caught up"
+              return s.due + " due  ·  " + s.fresh + " new"
+            }
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+
+            iconComponent: Component {
+              Text {
+                text: "󰘸"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.displayLarge
+              }
+            }
+
+            trailingControl: Component {
+              Row {
+                spacing: Style.spacing.lg
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: reviewer.answered > 0
+                  text: "Done " + reviewer.answered
+                  color: root.foreground
+                  opacity: 0.5
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: String(reviewer.stats ? reviewer.stats.pending : 0)
+                  color: (reviewer.stats && reviewer.stats.pending > 0) ? Color.accent : root.foreground
+                  opacity: (reviewer.stats && reviewer.stats.pending > 0) ? 1.0 : 0.4
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.heading
+                }
+              }
+            }
+          }
+
+          PanelSeparator {
+            width: parent.width
+            foreground: root.foreground
+          }
+
+          PanelSectionHeader {
+            width: parent.width
+            text: {
+              if (reviewer.phase !== "reviewing") return "SESSION"
+              var s = reviewer.currentState
+              if (s.phase === "new") return "NEW"
+              if (s.phase === "learning") return "LEARNING"
+              if (s.phase === "relearning") return "RELEARNING  ·  " + s.lapses + " lapse" + (s.lapses === 1 ? "" : "s")
+              return "REVIEW  ·  " + Anki.formatInterval(s.interval) + "  ·  ease " + (s.ease / 1000).toFixed(2)
+            }
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          Reviewer {
+            id: reviewer
+            width: parent.width
+            deckPath: root.deckPath
+            stateDir: Quickshell.env("HOME") + "/.local/state/omarchy"
+            newPerDay: root.newPerDay
+            active: root.opened
+            foreground: root.foreground
+            accent: Color.accent
+            urgent: Color.urgent
+            fontFamily: root.fontFamily
+            // The whole point of the fullscreen surface: a card you can read
+            // from across the desk, in a face that holds still between answers.
+            minFaceHeight: root.faceHeight
+            questionFontSize: Style.font.display
+            answerFontSize: Style.font.heading
+          }
+
+          GradeButtons {
+            width: parent.width
+            visible: reviewer.phase === "reviewing" && reviewer.revealed
+            reviewer: reviewer
+            foreground: root.foreground
+            urgent: Color.urgent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.body
+            captionSize: Style.font.bodySmall
+          }
+
+          Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            text: reviewer.revealed
+                ? "1-4 grade  ·  space good  ·  r reload  ·  esc close"
+                : "space reveal  ·  r reload  ·  esc close"
+            color: root.foreground
+            opacity: 0.4
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+      }
+    }
+  }
+}
