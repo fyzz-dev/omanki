@@ -18,6 +18,7 @@ Panel {
   readonly property string deckPath: Anki.resolveDeck(root.setting("deck", ""), Quickshell.env("HOME"))
   readonly property int newPerDay: Anki.sanePerDay(root.setting("newPerDay", 20))
   readonly property var tags: Anki.normalizeTags(root.setting("tags", []))
+  readonly property int reviewsPerDay: Anki.sanePerDay(root.setting("reviewsPerDay", 0), 0)
   // The count is the point of the widget, but a bar that has to stay narrow
   // can turn it off and keep the glyph.
   readonly property bool showCount: root.setting("showCount", true) !== false
@@ -155,6 +156,7 @@ Panel {
           deckPath: root.deckPath
           stateDir: Quickshell.env("HOME") + "/.local/state/omarchy"
           newPerDay: root.newPerDay
+          reviewsPerDay: root.reviewsPerDay
           tags: root.tags
           active: root.opened
           foreground: root.foreground

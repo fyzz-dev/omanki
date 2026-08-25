@@ -15,6 +15,8 @@ Item {
   property string deckPath: ""
   property string stateDir: ""
   property int newPerDay: 20
+  // 0 means no cap. A limit you have not set should not be a limit of nothing.
+  property int reviewsPerDay: 0
 
   // Restrict the session to cards carrying any of these tags. Empty means the
   // whole deck.
@@ -63,7 +65,7 @@ Item {
 
   // Re-derived on every tick as well as on every answer, so a card that comes
   // due mid-session appears without the user doing anything.
-  property var stats: Anki.counts(root.cards, root.progress, root.now, root.newPerDay)
+  property var stats: Anki.counts(root.cards, root.progress, root.now, root.newPerDay, root.reviewsPerDay)
 
   property int now: Math.floor(Date.now() / 1000)
 
@@ -90,7 +92,18 @@ Item {
       ? Anki.previewIntervals(root.currentState, root.now)
       : ({ again: "", hard: "", good: "", easy: "" })
 
+  // Recomputed whenever the deck, the progress, or the clock moves, which is
+  // exactly when a statistic could have changed.
+  readonly property var deckStats:
+      Anki.deckStats(root.cards, root.progress, root.now, root.newPerDay, root.reviewsPerDay)
+
   signal graded(string grade)
+  signal cardAdded()
+
+  // Empty unless the last attempt to add a card failed, in which case it says
+  // why and the composer keeps what was typed.
+  property string addError: ""
+  property bool adding: false
 
   Component.onCompleted: root.reload()
 
@@ -118,12 +131,12 @@ Item {
   // ------------------------------------------------------------- the session
   function refresh() {
     root.now = Math.floor(Date.now() / 1000)
-    root.stats = Anki.counts(root.cards, root.progress, root.now, root.newPerDay)
+    root.stats = Anki.counts(root.cards, root.progress, root.now, root.newPerDay, root.reviewsPerDay)
   }
 
   function rebuild() {
     root.refresh()
-    var queue = Anki.buildQueue(root.cards, root.progress, root.now, root.newPerDay)
+    var queue = Anki.buildQueue(root.cards, root.progress, root.now, root.newPerDay, root.reviewsPerDay)
 
     // Only pin a card the session can actually show: a filter change could
     // have removed it, and a queue holding an id with no card behind it would
@@ -342,6 +355,69 @@ Item {
       stdinEnabled = false
     }
     onExited: root.flushSave()
+  }
+
+  // ------------------------------------------------------------ adding cards
+  //
+  // The deck belongs to the user, so this is read-modify-write over its actual
+  // text rather than a regeneration from what the session parsed: their
+  // formatting is lost to a reserialize, but their cards, their field order,
+  // and any field this plugin knows nothing about are not.
+  property var pendingCard: null
+
+  function addCard(front, back, tags) {
+    if (root.adding) return
+    root.addError = ""
+    root.adding = true
+    root.pendingCard = { front: front, back: back, tags: tags }
+    deckEditReader.running = true
+  }
+
+  Process {
+    id: deckEditReader
+    command: ["sh", "-c", Anki.READ_SH, "omanki-deck-edit", root.deckPath]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var card = root.pendingCard
+        root.pendingCard = null
+        if (!card) { root.adding = false; return }
+
+        var result = Anki.appendCard(text, card.front, card.back, card.tags)
+        if (result.error) {
+          root.addError = result.error
+          root.adding = false
+          return
+        }
+
+        deckWriter.document = result.raw
+        deckWriter.stdinEnabled = true
+        deckWriter.running = true
+      }
+    }
+  }
+
+  Process {
+    id: deckWriter
+    property string document: ""
+    command: ["sh", "-c", Anki.WRITE_SH, "omanki-deck-write",
+              Anki.dirOf(root.deckPath), Anki.baseOf(root.deckPath)]
+    stdinEnabled: true
+    onStarted: {
+      write(document)
+      document = ""
+      stdinEnabled = false
+    }
+    onExited: function(code) {
+      root.adding = false
+      if (code !== 0) {
+        root.addError = "Could not write the deck (" + code + ")"
+        return
+      }
+      // Re-read so the new card joins the session it was written for.
+      root.reload()
+      root.cardAdded()
+    }
   }
 
   // Two cadences from one timer.

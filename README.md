@@ -38,6 +38,8 @@ come back.
 | `space` / `enter` | Reveal the answer, then grade it Good |
 | `1` `2` `3` `4` | Again / Hard / Good / Easy |
 | `u` | Undo the last answer |
+| `s` | Statistics (overlay only) |
+| `a` | Add a card (overlay only) |
 | `r` | Reload the deck from disk |
 | `esc` | Close |
 
@@ -60,6 +62,31 @@ snapshot from an hour ago may no longer be true after the other surface has
 been answering the same deck.
 
 `u undo` appears in the footer only when there is something to take back.
+
+## Statistics and adding cards
+
+`s` and `a` in the fullscreen overlay. Both live there rather than in the bar
+panel, which has room for a card and not much else.
+
+**Statistics** shows the deck's composition — mature, young, learning, new —
+what falls due over the next seven days, and today's figures. Everything is
+derived from the cards themselves; the plugin keeps no review log, so
+*retention* is a lifetime figure per card (answers that never had to be
+relearned) rather than Anki's rolling window, and the view says so rather than
+letting the number be misread.
+
+**Adding a card** takes a front, a back, and optional comma-separated tags;
+`enter` moves between fields and saves from the last one. The form clears and
+stays open, so a run of cards is one flow.
+
+Writing goes read-modify-write over the deck's actual text, so existing cards
+keep their order and every field they had, including ones this plugin knows
+nothing about. Two things it will not do: overwrite a deck it could not parse —
+it hands the file back untouched and says so — or accept a front that already
+exists, since a card is identified by its front and a duplicate would share one
+schedule and never be seen. What it does not preserve is your *formatting*: the
+file is reserialized at two-space indent, so hand-tuned whitespace does not
+survive an in-app add.
 
 ## Your deck
 
@@ -105,10 +132,16 @@ hot-reloads on save.
 | `newPerDay` | `20` | How many unseen cards to introduce per study day. `0` reviews only. |
 | `showCount` | `true` | Show the waiting count next to the bar glyph. |
 | `tags` | *(none)* | Restrict the session to cards carrying any of these tags. |
+| `reviewsPerDay` | `0` | Cap how many due cards a day serves. `0` means no cap. |
 
 ```json
 { "id": "yamz8.omanki", "newPerDay": 10, "deck": "~/notes/spanish.json", "tags": ["verbs"] }
 ```
+
+`reviewsPerDay` caps only *reviews* — cards that existed before today. Cards
+introduced today are the `newPerDay` allowance's business, so a day of new
+cards cannot silently eat the review budget. When the cap bites, the most
+overdue cards are the ones served.
 
 `tags` takes a list or a bare string, matches case-insensitively, and is a
 union rather than an intersection — `["verbs", "food"]` keeps a card carrying

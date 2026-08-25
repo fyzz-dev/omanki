@@ -365,6 +365,66 @@ function sectionLabel(phase, state, tags) {
   return want.length ? head + "  ·  #" + want.join(" #") : head
 }
 
+// WRITE_SH takes a directory and a bare filename, so a configured deck path
+// has to be split before it can be written back.
+function dirOf(path) {
+  var p = text(path)
+  var i = p.lastIndexOf("/")
+  return i <= 0 ? "/" : p.slice(0, i)
+}
+
+function baseOf(path) {
+  var p = text(path)
+  var i = p.lastIndexOf("/")
+  return i === -1 ? p : p.slice(i + 1)
+}
+
+// Append a card to the deck's raw text.
+//
+// The deck is a file the user writes by hand, so this edits the parsed
+// document rather than regenerating it from parseDeck's output: entries keep
+// every field they had, including ones this plugin knows nothing about, and
+// keep their order. Anything it cannot read, it refuses to touch — overwriting
+// a deck it failed to understand would be the one unrecoverable thing it
+// could do.
+function appendCard(raw, front, back, tags) {
+  var f = text(front)
+  var b = text(back)
+  if (!f) return { error: "A card needs a front", raw: raw }
+  if (!b) return { error: "A card needs a back", raw: raw }
+
+  var data
+  if (!text(raw)) {
+    data = { cards: [] }
+  } else {
+    try {
+      data = JSON.parse(raw)
+    } catch (e) {
+      return { error: "Deck is not valid JSON — leaving it alone", raw: raw }
+    }
+  }
+
+  var list = Array.isArray(data) ? data : (data && Array.isArray(data.cards) ? data.cards : null)
+  if (!list) return { error: "Deck has no cards array — leaving it alone", raw: raw }
+
+  // A card is identified by its front, so two cards sharing one would share a
+  // single schedule and the second would never be seen.
+  var id = hashId(f)
+  for (var i = 0; i < list.length; i++) {
+    var e = list[i]
+    if (!e || typeof e !== "object") continue
+    var existing = text(e.id) || hashId(text(e.front))
+    if (existing === id) return { error: "That front is already in the deck", raw: raw }
+  }
+
+  var card = { front: f, back: b }
+  var t = normalizeTags(tags)
+  if (t.length) card.tags = t
+  list.push(card)
+
+  return { error: "", raw: JSON.stringify(data, null, 2) + "\n", id: id }
+}
+
 function emptyProgress() {
   return { reviews: {} }
 }
@@ -407,6 +467,42 @@ function introducedToday(progress, now) {
   return n
 }
 
+// Cards reviewed today, counted from the cards themselves so it survives a
+// merge for the same reason the new-card tally does.
+//
+// A "review" here means answering a card that already existed before today.
+// Cards introduced today are the new-card allowance's business, and counting
+// them twice would let a day of new cards silently consume the review budget.
+// This counts cards, not keystrokes: walking a card through its learning steps
+// is one card, not three, which is the number a daily cap should be about.
+function reviewsToday(progress, now) {
+  var reviews = (progress && progress.reviews) || {}
+  var today = dayKey(now)
+  var n = 0
+
+  for (var id in reviews) {
+    if (!Object.prototype.hasOwnProperty.call(reviews, id)) continue
+    var s = reviews[id]
+    if (!s) continue
+    if (text(s.firstDay) === today) continue
+    var when = num(s.updated, 0)
+    if (when > 0 && dayKey(when) === today) n++
+  }
+  return n
+}
+
+// How many more cards of each kind today's limits still allow. A limit of 0
+// means no limit: a cap you have not set should not be a cap of nothing.
+function remainingToday(progress, now, newPerDay, reviewsPerDay) {
+  var newLimit = Math.max(0, Math.round(num(newPerDay, 20)))
+  var revLimit = Math.max(0, Math.round(num(reviewsPerDay, 0)))
+
+  return {
+    fresh: Math.max(0, newLimit - introducedToday(progress, now)),
+    due: revLimit > 0 ? Math.max(0, revLimit - reviewsToday(progress, now)) : Infinity
+  }
+}
+
 // Reconcile two documents. Both surfaces hold their own copy and write the
 // whole thing, so a write that does not merge destroys whatever the other one
 // did — a card graded in the overlay simply vanishing when the bar panel next
@@ -439,10 +535,10 @@ function stateFor(progress, id) {
 // unseen cards as the day's allowance still permits. Reviews come before new
 // cards because a card you are about to forget is worth more than one you have
 // never seen.
-function buildQueue(cards, progress, now, newPerDay) {
+function buildQueue(cards, progress, now, newPerDay, reviewsPerDay) {
   var rolled = progress || emptyProgress()
-  var limit = Math.max(0, Math.round(num(newPerDay, 20)))
-  var remaining = Math.max(0, limit - introducedToday(rolled, now))
+  var left = remainingToday(rolled, now, newPerDay, reviewsPerDay)
+  var remaining = left.fresh
 
   var due = []
   var fresh = []
@@ -459,8 +555,11 @@ function buildQueue(cards, progress, now, newPerDay) {
 
   due.sort(function(a, b) { return a.due - b.due })
 
+  // The cap trims the tail, so what survives is the most overdue — the cards
+  // closest to being forgotten, which is what a partial day should spend
+  // itself on.
   var queue = []
-  for (var d = 0; d < due.length; d++) queue.push(due[d].id)
+  for (var d = 0; d < due.length && d < left.due; d++) queue.push(due[d].id)
   return queue.concat(fresh)
 }
 
@@ -484,10 +583,10 @@ function promote(queue, id) {
 
 // Headline numbers for the bar and the panel. `waiting` is a card in learning
 // that is not due yet — the reason a session can be empty and still unfinished.
-function counts(cards, progress, now, newPerDay) {
+function counts(cards, progress, now, newPerDay, reviewsPerDay) {
   var rolled = progress || emptyProgress()
-  var limit = Math.max(0, Math.round(num(newPerDay, 20)))
-  var remaining = Math.max(0, limit - introducedToday(rolled, now))
+  var left = remainingToday(rolled, now, newPerDay, reviewsPerDay)
+  var remaining = left.fresh
 
   var out = {
     total: cards.length,
@@ -515,8 +614,88 @@ function counts(cards, progress, now, newPerDay) {
   }
 
   out.fresh = Math.min(out.fresh, remaining)
+  // Held back by today's cap rather than not due — worth separating, because
+  // "nothing left today" and "nothing due" are different things to be told.
+  out.held = Math.max(0, out.due - left.due)
+  out.due = Math.min(out.due, left.due)
   out.pending = out.due + out.fresh
   return out
+}
+
+// ------------------------------------------------------------------- stats
+//
+// What a person actually wants to know about a deck: how far through it they
+// are, how much is coming, and whether the scheduling is working. Everything
+// here is derived from the cards — there is no review log, so nothing depends
+// on history the plugin does not keep.
+
+// A card is "mature" once its interval reaches three weeks, Anki's threshold.
+// The distinction matters because accuracy on cards you have known for a month
+// says something quite different from accuracy on ones you met yesterday.
+var MATURE_INTERVAL = 21 * DAY
+
+function deckStats(cards, progress, now, newPerDay, reviewsPerDay) {
+  var list = cards || []
+  var out = {
+    total: list.length,
+    fresh: 0,        // never answered
+    learning: 0,     // in learning or relearning
+    young: 0,        // in review, interval under three weeks
+    mature: 0,       // in review, interval three weeks or more
+    reps: 0,
+    lapses: 0,
+    lapsed: 0,       // cards that have lapsed at least once
+    easeSum: 0,
+    easeCount: 0,
+    answeredToday: 0,
+    introducedToday: introducedToday(progress, now),
+    reviewsToday: reviewsToday(progress, now),
+    forecast: [0, 0, 0, 0, 0, 0, 0]
+  }
+
+  var today = dayKey(now)
+
+  for (var i = 0; i < list.length; i++) {
+    var s = stateFor(progress, list[i].id)
+
+    if (s.phase === "new") { out.fresh++; continue }
+
+    if (s.phase === "learning" || s.phase === "relearning") out.learning++
+    else if (s.interval >= MATURE_INTERVAL) out.mature++
+    else out.young++
+
+    out.reps += s.reps
+    out.lapses += s.lapses
+    if (s.lapses > 0) out.lapsed++
+    out.easeSum += s.ease
+    out.easeCount++
+
+    if (s.updated > 0 && dayKey(s.updated) === today) out.answeredToday++
+
+    // Seven days ahead, bucketed by day. Anything already due lands in the
+    // first bucket, because "today" is what you would be shown now.
+    var days = Math.floor((s.due - now) / DAY)
+    if (days < 0) days = 0
+    if (days < out.forecast.length) out.forecast[days]++
+  }
+
+  out.seen = out.total - out.fresh
+  out.ease = out.easeCount ? out.easeSum / out.easeCount / 1000 : 0
+
+  // Rough retention: how often an answered card has *not* had to be relearned.
+  // With no review log this is the honest approximation available — it is a
+  // lifetime figure per card, not a rolling window, so it moves slowly.
+  out.retention = out.reps > 0 ? Math.max(0, 1 - (out.lapses / out.reps)) : 0
+
+  var left = remainingToday(progress, now, newPerDay, reviewsPerDay)
+  out.freshLeft = left.fresh
+  out.dueLeft = left.due
+
+  return out
+}
+
+function percent(fraction) {
+  return Math.round(Math.max(0, Math.min(1, fraction || 0)) * 100) + "%"
 }
 
 // ------------------------------------------------------------------ file I/O
@@ -576,9 +755,10 @@ function resolveDeck(configured, home) {
 
 // A typo in shell.json should leave the plugin usable, not stop it introducing
 // cards, so anything unparseable falls back to the default rather than to zero.
-function sanePerDay(value) {
+function sanePerDay(value, fallback) {
   var n = parseInt(value, 10)
-  return (isFinite(n) && n >= 0) ? n : 20
+  var back = (fallback === undefined) ? 20 : fallback
+  return (isFinite(n) && n >= 0) ? n : back
 }
 
 // Our own entry in shell.json, wherever it lives. A plugin placed in the bar

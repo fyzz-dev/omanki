@@ -22,7 +22,8 @@ const EXPORTS = [
   "newState", "normalizeState", "grade", "previewIntervals", "formatInterval",
   "dayKey", "hashId", "parseDeck", "emptyProgress", "parseProgress",
   "stateFor", "buildQueue", "counts", "serializeProgress", "findEntry",
-  "mergeProgress", "introducedToday",
+  "mergeProgress", "introducedToday", "reviewsToday", "remainingToday",
+  "deckStats", "percent", "appendCard", "dirOf", "baseOf", "MATURE_INTERVAL",
   "resolveDeck", "sanePerDay", "normalizeTags", "filterByTags", "sectionLabel", "promote", "UNDO_DEPTH",
   "READ_SH", "WRITE_SH",
 ]
@@ -320,6 +321,132 @@ group("undo restores what the answer changed")
   t("a lapse changes ease and interval", lapsed.ease !== review.ease && lapsed.interval !== review.interval)
   t("and leaves the original untouched to restore from",
     review.ease === 2500 && review.interval === 10 * DAY && review.lapses === 0)
+}
+
+group("the daily review cap")
+{
+  const cards = G.parseDeck(JSON.stringify(
+    Array.from({ length: 5 }, (_, i) => ({ front: "q" + i, back: "a" + i })))).cards
+  const today = G.dayKey(NOW)
+
+  // Five cards, all due, all first seen well before today.
+  const due = { reviews: {} }
+  for (const c of cards)
+    due.reviews[c.id] = { phase: "review", due: NOW - 100, interval: 5 * DAY, ease: 2500,
+                          reps: 3, lapses: 0, step: 0, updated: 0, firstDay: "1999-01-01" }
+
+  t("no cap serves everything due", G.buildQueue(cards, due, NOW, 0, 0).length === 5)
+  t("a cap trims the queue", G.buildQueue(cards, due, NOW, 0, 2).length === 2)
+  t("counts agree with the queue", G.counts(cards, due, NOW, 0, 2).due === 2)
+  t("what the cap holds back is reported separately", G.counts(cards, due, NOW, 0, 2).held === 3)
+  t("nothing is held back without a cap", G.counts(cards, due, NOW, 0, 0).held === 0)
+
+  t("the most overdue survive the trim", (() => {
+    const spread = { reviews: {} }
+    cards.forEach((c, i) => {
+      spread.reviews[c.id] = { phase: "review", due: NOW - (100 - i * 10), interval: DAY,
+                               ease: 2500, reps: 3, lapses: 0, step: 0, updated: 0, firstDay: "1999-01-01" }
+    })
+    return G.buildQueue(cards, spread, NOW, 0, 1)[0] === cards[0].id
+  })())
+
+  // Answering today spends the budget.
+  const doneToday = JSON.parse(JSON.stringify(due))
+  doneToday.reviews[cards[0].id].updated = NOW
+  doneToday.reviews[cards[1].id].updated = NOW
+  t("cards answered today count as reviews", G.reviewsToday(doneToday, NOW) === 2)
+  t("a spent budget serves nothing", G.buildQueue(cards, doneToday, NOW, 0, 2).length === 0)
+
+  t("a card introduced today is not also a review", (() => {
+    const fresh = { reviews: { x: { phase: "learning", due: NOW, interval: 0, ease: 2500,
+                                    reps: 1, lapses: 0, step: 0, updated: NOW, firstDay: today } } }
+    return G.reviewsToday(fresh, NOW) === 0
+  })())
+  t("an unanswered card is not a review today", G.reviewsToday(due, NOW) === 0)
+
+  t("remainingToday reports an uncapped budget as infinite",
+    G.remainingToday(due, NOW, 20, 0).due === Infinity)
+  t("and a spent one as zero", G.remainingToday(doneToday, NOW, 20, 2).due === 0)
+}
+
+group("deck statistics")
+{
+  const cards = G.parseDeck(JSON.stringify(
+    Array.from({ length: 6 }, (_, i) => ({ front: "q" + i, back: "a" + i })))).cards
+  const [a, b, c, d, e, f] = cards.map((x) => x.id)
+
+  const progress = { reviews: {
+    [a]: { phase: "review", due: NOW + 30 * DAY, interval: 30 * DAY, ease: 2600, reps: 9, lapses: 0, step: 0, updated: NOW, firstDay: "1999-01-01" },
+    [b]: { phase: "review", due: NOW + 2 * DAY, interval: 2 * DAY, ease: 2400, reps: 4, lapses: 1, step: 0, updated: 0, firstDay: "1999-01-01" },
+    [c]: { phase: "learning", due: NOW + 60, interval: 0, ease: 2500, reps: 1, lapses: 0, step: 0, updated: NOW, firstDay: G.dayKey(NOW) },
+    [d]: { phase: "relearning", due: NOW + 600, interval: DAY, ease: 2300, reps: 7, lapses: 2, step: 0, updated: 0, firstDay: "1999-01-01" },
+  } }
+
+  const s = G.deckStats(cards, progress, NOW, 20, 0)
+  t("counts the whole deck", s.total === 6)
+  t("unanswered cards are new", s.fresh === 2)
+  t("a long interval is mature", s.mature === 1)
+  t("a short one is young", s.young === 1)
+  t("learning and relearning are one bucket", s.learning === 2)
+  t("the buckets account for every card", s.fresh + s.mature + s.young + s.learning === s.total)
+  t("seen is the deck less the new", s.seen === 4)
+  t("lapsed cards are counted once each", s.lapsed === 2)
+  t("lapses are totalled", s.lapses === 3)
+  t("average ease is over answered cards only", Math.abs(s.ease - 2.45) < 0.001)
+  t("answered today is counted", s.answeredToday === 2)
+  t("retention falls out of lapses over reps", Math.abs(s.retention - (1 - 3 / 21)) < 0.001)
+
+  t("the forecast buckets by day", s.forecast[0] === 2 && s.forecast[2] === 1)
+  t("the forecast spans a week", s.forecast.length === 7)
+  t("cards beyond the week are not in it", s.forecast.reduce((x, y) => x + y, 0) === 3)
+
+  const empty = G.deckStats([], G.emptyProgress(), NOW, 20, 0)
+  t("an empty deck is all zeroes, not NaN", empty.total === 0 && empty.ease === 0 && empty.retention === 0)
+  t("percent formats a fraction", G.percent(0.8) === "80%")
+  t("percent clamps", G.percent(9) === "100%" && G.percent(-1) === "0%")
+}
+
+group("adding a card to the deck")
+{
+  const deck = JSON.stringify({ cards: [{ front: "a", back: "1", note: "kept" }] }, null, 2)
+
+  const added = G.appendCard(deck, "b", "2", ["x"])
+  t("succeeds", added.error === "")
+  t("the new card is appended", JSON.parse(added.raw).cards.length === 2)
+  t("the new card holds what was typed", (() => {
+    const card = JSON.parse(added.raw).cards[1]
+    return card.front === "b" && card.back === "2" && card.tags.join() === "x"
+  })())
+  t("fields the plugin knows nothing about survive",
+    JSON.parse(added.raw).cards[0].note === "kept")
+  t("existing cards keep their order", JSON.parse(added.raw).cards[0].front === "a")
+  t("input is trimmed", JSON.parse(G.appendCard(deck, "  c  ", "  3  ").raw).cards[1].front === "c")
+  t("no tags means no tags key", JSON.parse(G.appendCard(deck, "c", "3").raw).cards[1].tags === undefined)
+  t("a bare array deck stays a bare array",
+    Array.isArray(JSON.parse(G.appendCard('[{"front":"a","back":"1"}]', "b", "2").raw)))
+  t("an absent deck is created", JSON.parse(G.appendCard("", "a", "1").raw).cards.length === 1)
+
+  t("a missing front is refused", G.appendCard(deck, "", "2").error.length > 0)
+  t("a missing back is refused", G.appendCard(deck, "b", "  ").error.length > 0)
+  t("a duplicate front is refused", G.appendCard(deck, "a", "different").error.length > 0)
+  t("a duplicate is refused even against an explicit id",
+    G.appendCard(JSON.stringify({ cards: [{ id: G.hashId("z"), front: "other", back: "1" }] }), "z", "2").error.length > 0)
+
+  // The one unrecoverable thing it could do is overwrite a deck it failed to
+  // parse, so a broken deck must come back untouched.
+  const broken = "{ not json"
+  const refused = G.appendCard(broken, "b", "2")
+  t("a broken deck is refused", refused.error.length > 0)
+  t("and handed back byte for byte", refused.raw === broken)
+  t("a deck with no cards array is refused", G.appendCard('{"x":1}', "b", "2").error.length > 0)
+}
+
+group("splitting a deck path for the writer")
+{
+  t("directory", G.dirOf("/home/u/.local/share/omanki/cards.json") === "/home/u/.local/share/omanki")
+  t("file name", G.baseOf("/home/u/.local/share/omanki/cards.json") === "cards.json")
+  t("a bare name has no directory", G.baseOf("cards.json") === "cards.json")
+  t("a root-level file keeps a valid directory", G.dirOf("/cards.json") === "/")
 }
 
 group("the study day rolls over at 4am, not midnight")

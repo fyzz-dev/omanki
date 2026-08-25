@@ -41,6 +41,11 @@ Item {
   readonly property string deckPath: Anki.resolveDeck(root.pluginSettings.deck, Quickshell.env("HOME"))
   readonly property int newPerDay: Anki.sanePerDay(root.pluginSettings.newPerDay)
   readonly property var tags: Anki.normalizeTags(root.pluginSettings.tags)
+  readonly property int reviewsPerDay: Anki.sanePerDay(root.pluginSettings.reviewsPerDay, 0)
+
+  // review | stats | add. The overlay is the surface with room for more than
+  // one card, so it is the one that gets the other two.
+  property string mode: "review"
 
   // Wide enough to read a sentence without becoming a wall of text, and capped
   // so it does not stretch across an ultrawide.
@@ -58,11 +63,23 @@ Item {
     if (payload.fontFamily) root.fontFamily = payload.fontFamily
 
     root.opened = true
+    root.mode = "review"
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   function close() {
     root.opened = false
+  }
+
+  function showReview() {
+    root.mode = "review"
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function showAdd() {
+    root.mode = "add"
+    composer.reset()
+    Qt.callLater(function() { composer.focusFirst() })
   }
 
   function dismiss() {
@@ -118,17 +135,29 @@ Item {
         Keys.onPressed: function(event) {
           switch (event.key) {
             case Qt.Key_Escape:
+              // Back out one level first: leaving the deck entirely because
+              // someone wanted out of the stats would be a rude surprise.
+              if (root.mode !== "review") { root.showReview(); event.accepted = true; return }
               root.dismiss(); event.accepted = true; return
             case Qt.Key_Space:
             case Qt.Key_Return:
             case Qt.Key_Enter:
+              // The composer owns typing, so these must reach its fields.
+              if (root.mode === "add") return
               // Reveal, then grade Good — the same two presses Anki trains
               // into your hands.
               reviewer.activate(); event.accepted = true; return
           }
 
+          // Everything below is a letter or digit, which in the composer is
+          // someone typing a card rather than issuing a command.
+          if (root.mode === "add") return
+
           var k = event.text ? event.text.toLowerCase() : ""
-          if (k === "1") reviewer.answer("again")
+          if (k === "s") root.mode = (root.mode === "stats" ? "review" : "stats")
+          else if (k === "a") root.showAdd()
+          else if (root.mode !== "review") return
+          else if (k === "1") reviewer.answer("again")
           else if (k === "2") reviewer.answer("hard")
           else if (k === "3") reviewer.answer("good")
           else if (k === "4") reviewer.answer("easy")
@@ -207,7 +236,9 @@ Item {
 
           PanelSectionHeader {
             width: parent.width
-            text: Anki.sectionLabel(reviewer.phase, reviewer.currentState, root.tags)
+            text: root.mode === "stats" ? "STATISTICS"
+                : root.mode === "add" ? "ADD A CARD"
+                : Anki.sectionLabel(reviewer.phase, reviewer.currentState, root.tags)
             foreground: root.foreground
             fontFamily: root.fontFamily
           }
@@ -215,9 +246,11 @@ Item {
           Reviewer {
             id: reviewer
             width: parent.width
+            visible: root.mode === "review"
             deckPath: root.deckPath
             stateDir: Quickshell.env("HOME") + "/.local/state/omarchy"
             newPerDay: root.newPerDay
+            reviewsPerDay: root.reviewsPerDay
             tags: root.tags
             active: root.opened
             foreground: root.foreground
@@ -233,7 +266,7 @@ Item {
 
           GradeButtons {
             width: parent.width
-            visible: reviewer.phase === "reviewing" && reviewer.revealed
+            visible: root.mode === "review" && reviewer.phase === "reviewing" && reviewer.revealed
             reviewer: reviewer
             foreground: root.foreground
             urgent: Color.urgent
@@ -242,12 +275,46 @@ Item {
             captionSize: Style.font.bodySmall
           }
 
+          StatsView {
+            width: parent.width
+            visible: root.mode === "stats"
+            stats: reviewer.deckStats
+            foreground: root.foreground
+            accent: Color.accent
+            urgent: Color.urgent
+            fontFamily: root.fontFamily
+          }
+
+          CardComposer {
+            id: composer
+            width: parent.width
+            visible: root.mode === "add"
+            reviewer: reviewer
+            foreground: root.foreground
+            accent: Color.accent
+            urgent: Color.urgent
+            fontFamily: root.fontFamily
+            onDismissed: root.showReview()
+          }
+
           Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
+            visible: root.mode === "review"
             text: (reviewer.revealed ? "1-4 grade  ·  space good" : "space reveal")
                 + (reviewer.canUndo ? "  ·  u undo" : "")
-                + "  ·  r reload  ·  esc close"
+                + "  ·  s stats  ·  a add  ·  esc close"
+            color: root.foreground
+            opacity: 0.4
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            visible: root.mode === "stats"
+            text: "s back to review  ·  a add a card  ·  esc close"
             color: root.foreground
             opacity: 0.4
             font.family: root.fontFamily
