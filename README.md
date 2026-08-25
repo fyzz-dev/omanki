@@ -31,6 +31,109 @@ come back.
                   1        2      3      4
 ```
 
+## Install
+
+```bash
+omarchy plugin add https://github.com/yamz8/omanki.git --enable
+```
+
+That clones the repo into `~/.config/omarchy/plugins/yamz8.omanki/`, validates
+it against the plugin manifest schema, and offers to place the bar widget. To
+update later:
+
+```bash
+omarchy plugin update yamz8.omanki
+```
+
+The fullscreen overlay is summoned by a keybind, which you add yourself — see
+[Placing it and binding it](#placing-it-and-binding-it) below.
+
+## Remove
+
+```bash
+omarchy plugin remove yamz8.omanki
+```
+
+That deletes `~/.config/omarchy/plugins/yamz8.omanki/` and drops the plugin's
+entry from `~/.config/omarchy/shell.json`, taking the bar widget with it.
+
+Three things it does not touch, so remove them by hand if you want them gone:
+
+- your deck, at `~/.local/share/omanki/cards.json`
+- your scheduling progress, at `~/.local/state/omarchy/omanki.json`
+- any keybind you added to `~/.config/hypr/bindings.lua`
+
+## Requirements
+
+Omarchy 4 (Quattro) or newer. No external dependencies, no packages to
+install, no network access, and no privileged operations — the plugin is QML
+and JavaScript running inside the existing `omarchy-shell` process, and uses
+only the shell's own `qs.Ui` and `qs.Commons` modules.
+
+`node` is needed to run the test suite, but never to use the plugin.
+
+### What it writes
+
+Worth knowing before you point this at your notes.
+
+**`~/.local/state/omarchy/omanki.json`** — scheduling progress, written on
+every answer. Entirely the plugin's own file.
+
+**`~/.local/share/omanki/cards.json`** — your deck. Only ever appended to, and
+only when you add a card through the `a` composer. If you never use it, the
+plugin never writes your deck at all. When it does:
+
+- existing cards keep their order and every field they carried, including ones
+  this plugin knows nothing about;
+- a deck it cannot parse is handed back untouched rather than overwritten —
+  that being the one unrecoverable thing it could do;
+- a duplicate front is refused, since a card is identified by its front and two
+  would share a single schedule;
+- **your formatting is not preserved.** The file is reserialized at two-space
+  indent, so hand-tuned whitespace does not survive an in-app add.
+
+Both files sit in directories anything running as you can write, while the
+shell reading them is a long-lived process shared by the whole desktop. So both
+are treated as untrusted input: reads refuse symlinks and anything that is not
+a regular file, open non-blocking so a planted FIFO cannot stall the shell, and
+stop at 256 KiB; writes send the document over stdin so nothing is interpolated
+into a shell, and land via a fresh 0600 file renamed over the destination,
+which replaces a symlink instead of following it.
+
+### Placing it and binding it
+
+`omarchy plugin add --enable` offers to place the bar widget. If you skipped
+that, or want it somewhere else:
+
+```bash
+omarchy bar put yamz8.omanki --section right
+```
+
+Or add `{ "id": "yamz8.omanki" }` to a section of `bar.layout` in
+`~/.config/omarchy/shell.json` by hand.
+
+The overlay has no default keybind. In `~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + CTRL + J", "omanki", "omarchy-shell shell toggle yamz8.omanki")
+```
+
+Pick that key with care. `SUPER + CTRL + M` looks free and is not — it sits one
+modifier key away from Omarchy's stock `SUPER + SHIFT + M` "Music" binding, and
+missing Ctrl for Shift launches `omarchy-launch-spotify`, which offers to
+install Spotify if it is absent. Check a candidate against the live table
+rather than the config, since the two can disagree:
+
+```bash
+omarchy menu keybindings --print | grep -i "SUPER CTRL"
+```
+
+A note if you are hacking on this: the Omarchy shell hot-reloads plugin code,
+but a shell process that started *before* the plugin directory existed cannot
+load a newly added overlay entry point — Qt caches its view of the filesystem
+and reports it as a spurious "File name case mismatch". `omarchy restart shell`
+once after adding a new entry point, and hot-reload works normally from then on.
+
 ## Keys
 
 | Key | Does |
@@ -233,33 +336,6 @@ a minute arrives on its own. While it is closed it ticks once a minute and
 re-reads both files, which is what keeps the bar's count honest when cards
 come due unattended or the other surface has been answering them.
 
-## Installing it in the bar
+## License
 
-```bash
-omarchy bar put yamz8.omanki --section right
-```
-
-Or add `{ "id": "yamz8.omanki" }` to a section of `bar.layout` in
-`~/.config/omarchy/shell.json` by hand.
-
-The overlay is summoned by keybind. In `~/.config/hypr/bindings.lua`:
-
-```lua
-o.bind("SUPER + CTRL + J", "omanki", "omarchy-shell shell toggle yamz8.omanki")
-```
-
-Pick that key with care. `SUPER + CTRL + M` looks free and is not — it sits one
-modifier key away from Omarchy's stock `SUPER + SHIFT + M` "Music" binding, and
-missing Ctrl for Shift launches `omarchy-launch-spotify`, which offers to
-install Spotify if it is absent. Check a candidate against the live table
-rather than the config, since the two can disagree:
-
-```bash
-omarchy menu keybindings --print | grep -i "SUPER CTRL"
-```
-
-A note if you are hacking on this: the Omarchy shell hot-reloads plugin code,
-but a shell process that started *before* the plugin directory existed cannot
-load a newly added overlay entry point — Qt caches its view of the filesystem
-and reports it as a spurious "File name case mismatch". `omarchy restart shell`
-once after adding a new entry point, and hot-reload works normally from then on.
+MIT — see [LICENSE](LICENSE).
