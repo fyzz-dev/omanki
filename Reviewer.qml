@@ -118,7 +118,6 @@ Item {
   // ------------------------------------------------------------- the session
   function refresh() {
     root.now = Math.floor(Date.now() / 1000)
-    root.progress = Anki.rollDay(root.progress, root.now)
     root.stats = Anki.counts(root.cards, root.progress, root.now, root.newPerDay)
   }
 
@@ -169,14 +168,11 @@ Item {
     root.undoStack = root.undoStack.concat([{
       id: id,
       had: Object.prototype.hasOwnProperty.call(reviews, id),
-      before: before,
-      introduced: root.progress.introduced
+      before: before
     }]).slice(-Anki.UNDO_DEPTH)
 
     reviews[id] = after
-
-    var introduced = root.progress.introduced + (before.phase === "new" ? 1 : 0)
-    root.progress = { day: root.progress.day, introduced: introduced, reviews: reviews }
+    root.progress = { reviews: reviews }
 
     root.answered++
     root.save()
@@ -197,10 +193,18 @@ Item {
 
     var reviews = {}
     for (var key in root.progress.reviews) reviews[key] = root.progress.reviews[key]
-    if (last.had) reviews[last.id] = last.before
-    else delete reviews[last.id]
 
-    root.progress = { day: root.progress.day, introduced: last.introduced, reviews: reviews }
+    // Restored with a fresh stamp, and written rather than deleted. A merge
+    // resolves per card by which entry is newer, so an older restored state
+    // would lose to the answer it is undoing, and an outright deletion would
+    // simply be re-added from the other surface's copy. A card that had no
+    // history goes back as an untouched new one, which counts as new
+    // everywhere it matters.
+    var restored = Anki.normalizeState(last.had ? last.before : null)
+    restored.updated = root.now
+    reviews[last.id] = restored
+
+    root.progress = { reviews: reviews }
     root.answered = Math.max(0, root.answered - 1)
     root.save()
 
@@ -268,26 +272,60 @@ Item {
   }
 
   // ---------------------------------------------------------------- saving
-  // One writer at a time. Each document is complete, so a save that lands
+  //
+  // Every save is read-merge-write, never a blind overwrite. Both surfaces can
+  // be on screen at once, each holding its own copy of the document, and
+  // neither reloads while it is being used — so a surface writing what it
+  // remembers erases whatever the other one did in the meantime. Merging on
+  // the way out costs one small read per answer and makes the two independent.
+  //
+  // The read closes the window to the few milliseconds between it and the
+  // rename, which no human answering cards can hit; the alternative, holding
+  // the file open across the merge, would mean the shell holding a lock on a
+  // file the user may want to delete.
+  //
+  // One writer at a time. Each document is complete, so a save landing
   // mid-write waits and supersedes whatever was queued behind it.
-  property string pendingSave: ""
+  property bool saveQueued: false
 
   function save() {
-    root.pendingSave = Anki.serializeProgress(root.progress)
+    root.saveQueued = true
     root.flushSave()
   }
 
   function flushSave() {
-    if (!root.pendingSave || writer.running) return
-    writer.document = root.pendingSave
-    root.pendingSave = ""
-    // Reopened for every write. Closing stdin is how the document is
-    // terminated (see below), and a Process keeps that setting, so without
-    // this the second save of a session starts a `cat` that blocks forever on
-    // a stdin nobody will write to — leaving `running` true and silently
-    // dropping every save after the first.
-    writer.stdinEnabled = true
-    writer.running = true
+    if (!root.saveQueued || writer.running || merger.running) return
+    root.saveQueued = false
+    merger.running = true
+  }
+
+  // Reads what is on disk right now, folds this surface's state into it, and
+  // hands the result to the writer.
+  Process {
+    id: merger
+    command: ["sh", "-c", Anki.READ_SH, "omanki-merge", root.stateDir + "/omanki.json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var merged = Anki.mergeProgress(root.progress, Anki.parseProgress(text))
+
+        // Adopt the merged document, so the next answer builds on the other
+        // surface's work rather than on a copy that is already behind. The
+        // queue is left alone: it is rebuilt on the next answer anyway, and
+        // rearranging cards under someone mid-session would be worse than a
+        // slightly stale order.
+        root.progress = merged
+
+        writer.document = Anki.serializeProgress(merged)
+        // Reopened for every write. Closing stdin is how the document is
+        // terminated (see below), and a Process keeps that setting, so without
+        // this the second save of a session starts a `cat` that blocks forever
+        // on a stdin nobody will write to — leaving `running` true and
+        // silently dropping every save after the first.
+        writer.stdinEnabled = true
+        writer.running = true
+      }
+    }
   }
 
   Process {

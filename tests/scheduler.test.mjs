@@ -20,8 +20,9 @@ const EXPORTS = [
   "MINUTE", "HOUR", "DAY", "GRADES", "LEARNING_STEPS", "RELEARNING_STEPS",
   "STARTING_EASE", "MIN_EASE", "MAX_EASE", "MAX_INTERVAL",
   "newState", "normalizeState", "grade", "previewIntervals", "formatInterval",
-  "dayKey", "hashId", "parseDeck", "emptyProgress", "parseProgress", "rollDay",
+  "dayKey", "hashId", "parseDeck", "emptyProgress", "parseProgress",
   "stateFor", "buildQueue", "counts", "serializeProgress", "findEntry",
+  "mergeProgress", "introducedToday",
   "resolveDeck", "sanePerDay", "normalizeTags", "filterByTags", "sectionLabel", "promote", "UNDO_DEPTH",
   "READ_SH", "WRITE_SH",
 ]
@@ -229,8 +230,6 @@ group("the queue")
   const today = G.dayKey(NOW)
 
   const progress = {
-    day: today,
-    introduced: 0,
     reviews: {
       [a]: { phase: "review", due: NOW - 100, interval: 5 * DAY, ease: 2500, reps: 3, lapses: 0, step: 0 },
       [b]: { phase: "review", due: NOW + 5 * DAY, interval: 5 * DAY, ease: 2500, reps: 3, lapses: 0, step: 0 },
@@ -244,15 +243,25 @@ group("the queue")
   t("due cards come before new ones", queue.indexOf(a) < queue.indexOf(c))
 
   t("the new-card allowance is respected",
-    G.buildQueue(cards, { day: today, introduced: 0, reviews: {} }, NOW, 1).length === 1)
+    G.buildQueue(cards, G.emptyProgress(), NOW, 1).length === 1)
+
+  // Two cards dated today, so the allowance of two is already spent.
+  const spentToday = { reviews: {
+    [a]: { phase: "review", due: NOW + DAY, interval: DAY, ease: 2500, reps: 1, lapses: 0, step: 0, firstDay: today },
+    [b]: { phase: "review", due: NOW + DAY, interval: DAY, ease: 2500, reps: 1, lapses: 0, step: 0, firstDay: today },
+  } }
   t("cards introduced today count against it",
-    G.buildQueue(cards, { day: today, introduced: 2, reviews: {} }, NOW, 2).length === 0)
-  t("yesterday's count does not",
-    G.buildQueue(cards, { day: "1999-01-01", introduced: 99, reviews: {} }, NOW, 2).length === 2)
+    G.buildQueue(cards, spentToday, NOW, 2).length === 0)
+  t("the same cards dated yesterday do not", (() => {
+    const yesterday = JSON.parse(JSON.stringify(spentToday))
+    for (const id of Object.keys(yesterday.reviews)) yesterday.reviews[id].firstDay = "1999-01-01"
+    return G.buildQueue(cards, yesterday, NOW, 2).length === 1
+  })())
+  t("introducedToday counts only today's", G.introducedToday(spentToday, NOW) === 2)
+  t("an undated card counts as never introduced",
+    G.introducedToday({ reviews: { x: G.newState() } }, NOW) === 0)
 
   const overdue = {
-    day: today,
-    introduced: 0,
     reviews: {
       [a]: { phase: "review", due: NOW - 10, interval: DAY, ease: 2500, reps: 1, lapses: 0, step: 0 },
       [b]: { phase: "review", due: NOW - 9999, interval: DAY, ease: 2500, reps: 1, lapses: 0, step: 0 },
@@ -269,8 +278,6 @@ group("the queue")
   t("reports when the next card is due", stats.nextDue === NOW + 5 * DAY)
 
   const learning = {
-    day: today,
-    introduced: 1,
     reviews: { [a]: { phase: "learning", due: NOW + 60, interval: 0, ease: 2500, reps: 1, lapses: 0, step: 0 } },
   }
   t("a learning card not yet due is waiting, not due",
@@ -327,17 +334,78 @@ group("the study day rolls over at 4am, not midnight")
 group("progress round-trips")
 {
   const progress = {
-    day: "2026-01-15",
-    introduced: 3,
-    reviews: { abc: { phase: "review", due: NOW, interval: DAY, ease: 2500, reps: 1, lapses: 0, step: 0 } },
+    reviews: { abc: { phase: "review", due: NOW, interval: DAY, ease: 2500, reps: 1, lapses: 0, step: 0, updated: NOW, firstDay: "2026-01-15" } },
   }
   const back = G.parseProgress(G.serializeProgress(progress))
-  t("day survives", back.day === progress.day)
-  t("introduced survives", back.introduced === 3)
   t("card state survives", back.reviews.abc.interval === DAY)
-  t("a corrupt file is empty, not fatal", G.parseProgress("{not json").introduced === 0)
-  t("an absent file is empty", G.parseProgress("").day === "")
+  t("the change stamp survives", back.reviews.abc.updated === NOW)
+  t("the introduction date survives", back.reviews.abc.firstDay === "2026-01-15")
+  t("a corrupt file is empty, not fatal", Object.keys(G.parseProgress("{not json").reviews).length === 0)
+  t("an absent file is empty", Object.keys(G.parseProgress("").reviews).length === 0)
+  t("a document written before the tally was derived still loads",
+    G.parseProgress(JSON.stringify({ day: "2026-01-01", introduced: 9, reviews: progress.reviews }))
+      .reviews.abc.interval === DAY)
   t("an unknown card reads as new", G.stateFor(progress, "nope").phase === "new")
+}
+
+group("merging two surfaces' documents")
+{
+  const at = (t, extra) => Object.assign(
+    { phase: "review", due: NOW, interval: DAY, ease: 2500, reps: 1, lapses: 0, step: 0, updated: t, firstDay: "" },
+    extra || {})
+
+  // The exact loss reproduced by hand: the overlay answers two cards, the bar
+  // panel then saves a copy that predates both. Without merging, the panel's
+  // write erased a card outright.
+  const overlay = { reviews: { a: at(NOW + 10), b: at(NOW + 20) } }
+  const stalePanel = { reviews: {} }
+  const merged = G.mergeProgress(stalePanel, overlay)
+  t("a stale document cannot erase the other surface's work",
+    Object.keys(merged.reviews).sort().join(",") === "a,b")
+
+  t("the newer entry wins", G.mergeProgress(
+    { reviews: { a: at(NOW, { reps: 1 }) } },
+    { reviews: { a: at(NOW + 5, { reps: 9 }) } }).reviews.a.reps === 9)
+  t("and it wins from either side", G.mergeProgress(
+    { reviews: { a: at(NOW + 5, { reps: 9 }) } },
+    { reviews: { a: at(NOW, { reps: 1 }) } }).reviews.a.reps === 9)
+  t("a card only one side knows is kept", G.mergeProgress(
+    { reviews: { a: at(NOW) } }, { reviews: { b: at(NOW) } }).reviews.b !== undefined)
+  t("a tie is deterministic, keeping mine", G.mergeProgress(
+    { reviews: { a: at(NOW, { reps: 1 }) } },
+    { reviews: { a: at(NOW, { reps: 9 }) } }).reviews.a.reps === 1)
+
+  t("merging with nothing is a no-op",
+    G.mergeProgress({ reviews: { a: at(NOW) } }, G.emptyProgress()).reviews.a !== undefined)
+  t("merging into nothing adopts everything",
+    G.mergeProgress(G.emptyProgress(), { reviews: { a: at(NOW) } }).reviews.a !== undefined)
+  t("null operands are survivable", Object.keys(G.mergeProgress(null, null).reviews).length === 0)
+  t("merged entries are normalized, not trusted",
+    G.mergeProgress({ reviews: { a: { phase: "nonsense" } } }, null).reviews.a.phase === "new")
+  t("merging does not mutate either operand", (() => {
+    const mine = { reviews: { a: at(NOW, { reps: 1 }) } }
+    G.mergeProgress(mine, { reviews: { a: at(NOW + 5, { reps: 9 }) } })
+    return mine.reviews.a.reps === 1
+  })())
+
+  // Undo restores an older state, so it must be re-stamped or the merge would
+  // hand back the very answer it just took back.
+  t("an undo re-stamped as now survives a merge with the answer it undid", (() => {
+    const answered = at(NOW + 10, { reps: 5 })
+    const restored = at(NOW + 30, { reps: 4 })
+    return G.mergeProgress({ reviews: { a: restored } }, { reviews: { a: answered } }).reviews.a.reps === 4
+  })())
+}
+
+group("answers carry the stamps a merge needs")
+{
+  const answered = G.grade(G.newState(), "good", NOW)
+  t("an answer is stamped with when it happened", answered.updated === NOW)
+  t("a card leaving new is dated today", answered.firstDay === G.dayKey(NOW))
+
+  const older = G.grade({ phase: "review", due: NOW, interval: DAY, ease: 2500, reps: 3, lapses: 0, step: 0, firstDay: "1999-01-01" }, "good", NOW)
+  t("re-answering an old card keeps its original date", older.firstDay === "1999-01-01")
+  t("but restamps when it changed", older.updated === NOW)
 }
 
 group("settings are read from wherever the plugin is configured")

@@ -88,6 +88,12 @@ Scheduling progress is kept separately, in
 the deck you are writing by hand. Deleting that file resets every card to new
 and leaves your deck alone.
 
+Both surfaces can be open at once and both write that file, so every save is
+read-merge-write rather than a blind overwrite: the document on disk is read
+back, reconciled per card by which entry changed most recently, and only then
+replaced. Without that, whichever surface saved last would erase whatever the
+other had just answered.
+
 ## Settings
 
 Set these on the plugin's entry in `~/.config/omarchy/shell.json`; it
@@ -146,8 +152,24 @@ node tests/scheduler.test.mjs
 ```
 
 That covers the learning steps, interval growth, lapses and recovery, the
-clamps, deck parsing, queue order, the 4am rollover, and the hardening on both
-file-I/O snippets.
+clamps, deck parsing, queue order, the 4am rollover, document merging, and the
+hardening on both file-I/O snippets.
+
+Those tests are pure: they know nothing about processes, files, or two
+surfaces being open at once. Every bug this plugin has actually shipped lived
+in that gap and survived a green suite — a writer that silently dropped every
+save after the first, and two surfaces overwriting each other's answers. So
+there is a second, slower suite that drives the real shell with real
+keystrokes and reads the file back after every action:
+
+```bash
+tests/soak.sh
+```
+
+It needs a running `omarchy-shell` and `wtype`, and it takes the keyboard
+while it runs, so it is deliberately not part of the unit suite. Run it after
+any change to the save path, the surfaces, or the session lifecycle. Both
+historic bugs fail it.
 
 ## Layout
 

@@ -61,7 +61,14 @@ function newState() {
     ease: STARTING_EASE,
     reps: 0,
     lapses: 0,
-    step: 0
+    step: 0,
+    // When this card last changed, so two surfaces writing the same file can
+    // be reconciled per card instead of one overwriting the other wholesale.
+    updated: 0,
+    // The study day this card stopped being new. The day's new-card allowance
+    // is counted from these rather than from a stored tally, so the count
+    // cannot drift, double-count, or regress when documents are merged.
+    firstDay: ""
   }
 }
 
@@ -88,7 +95,9 @@ function normalizeState(state) {
     ease: clampEase(num(state.ease, STARTING_EASE)),
     reps: Math.max(0, Math.round(num(state.reps, 0))),
     lapses: Math.max(0, Math.round(num(state.lapses, 0))),
-    step: Math.max(0, Math.min(steps.length - 1, Math.round(num(state.step, 0))))
+    step: Math.max(0, Math.min(steps.length - 1, Math.round(num(state.step, 0)))),
+    updated: Math.max(0, num(state.updated, 0)),
+    firstDay: text(state.firstDay)
   }
 }
 
@@ -106,7 +115,12 @@ function grade(state, g, now) {
     ease: s.ease,
     reps: s.reps + 1,
     lapses: s.lapses,
-    step: s.step
+    step: s.step,
+    updated: now,
+    // Only the answer that ends a card's life as "new" dates it. A card
+    // already in review keeps whatever it had, so re-answering an old card
+    // never makes it look like one introduced today.
+    firstDay: s.phase === "new" ? dayKey(now) : s.firstDay
   }
 
   // ------------------------------------------------- new and learning cards
@@ -352,17 +366,17 @@ function sectionLabel(phase, state, tags) {
 }
 
 function emptyProgress() {
-  return { day: "", introduced: 0, reviews: {} }
+  return { reviews: {} }
 }
 
+// Documents written before the day tally became derived carry `day` and
+// `introduced` fields; they are simply ignored, which costs at most one day's
+// allowance once and never misreads a card.
 function parseProgress(raw) {
   var progress = emptyProgress()
   try {
     var data = JSON.parse(raw || "{}")
     if (!data || typeof data !== "object") return progress
-
-    progress.day = text(data.day)
-    progress.introduced = Math.max(0, Math.round(num(data.introduced, 0)))
 
     if (data.reviews && typeof data.reviews === "object") {
       for (var id in data.reviews) {
@@ -379,10 +393,42 @@ function parseProgress(raw) {
 // The new-card allowance is per study day, so a stale counter has to be
 // cleared before it is read rather than when it was written — the shell may
 // have been running since yesterday.
-function rollDay(progress, now) {
+// How many cards were introduced today, counted from the cards themselves.
+// A stored tally cannot survive two surfaces merging their documents; this
+// can, and it also removes any need to notice that the day rolled over.
+function introducedToday(progress, now) {
+  var reviews = (progress && progress.reviews) || {}
   var today = dayKey(now)
-  if (progress.day === today) return progress
-  return { day: today, introduced: 0, reviews: progress.reviews }
+  var n = 0
+  for (var id in reviews) {
+    if (!Object.prototype.hasOwnProperty.call(reviews, id)) continue
+    if (reviews[id] && text(reviews[id].firstDay) === today) n++
+  }
+  return n
+}
+
+// Reconcile two documents. Both surfaces hold their own copy and write the
+// whole thing, so a write that does not merge destroys whatever the other one
+// did — a card graded in the overlay simply vanishing when the bar panel next
+// saves. Per card the newer `updated` wins, and a card only one side knows
+// about is kept. Answering the same card in two surfaces within one second is
+// not something a person can do, so ties keep `mine` and stay deterministic.
+function mergeProgress(mine, theirs) {
+  var out = {}
+  var a = (mine && mine.reviews) || {}
+  var b = (theirs && theirs.reviews) || {}
+  var id
+
+  for (id in a) {
+    if (Object.prototype.hasOwnProperty.call(a, id)) out[id] = normalizeState(a[id])
+  }
+  for (id in b) {
+    if (!Object.prototype.hasOwnProperty.call(b, id)) continue
+    var t = normalizeState(b[id])
+    if (!out[id] || t.updated > out[id].updated) out[id] = t
+  }
+
+  return { reviews: out }
 }
 
 function stateFor(progress, id) {
@@ -394,9 +440,9 @@ function stateFor(progress, id) {
 // cards because a card you are about to forget is worth more than one you have
 // never seen.
 function buildQueue(cards, progress, now, newPerDay) {
-  var rolled = rollDay(progress || emptyProgress(), now)
+  var rolled = progress || emptyProgress()
   var limit = Math.max(0, Math.round(num(newPerDay, 20)))
-  var remaining = Math.max(0, limit - rolled.introduced)
+  var remaining = Math.max(0, limit - introducedToday(rolled, now))
 
   var due = []
   var fresh = []
@@ -439,9 +485,9 @@ function promote(queue, id) {
 // Headline numbers for the bar and the panel. `waiting` is a card in learning
 // that is not due yet — the reason a session can be empty and still unfinished.
 function counts(cards, progress, now, newPerDay) {
-  var rolled = rollDay(progress || emptyProgress(), now)
+  var rolled = progress || emptyProgress()
   var limit = Math.max(0, Math.round(num(newPerDay, 20)))
-  var remaining = Math.max(0, limit - rolled.introduced)
+  var remaining = Math.max(0, limit - introducedToday(rolled, now))
 
   var out = {
     total: cards.length,
@@ -513,11 +559,7 @@ var WRITE_SH = [
 
 function serializeProgress(progress) {
   var p = progress || emptyProgress()
-  return JSON.stringify({
-    day: text(p.day),
-    introduced: Math.max(0, Math.round(num(p.introduced, 0))),
-    reviews: p.reviews || {}
-  }) + "\n"
+  return JSON.stringify({ reviews: p.reviews || {} }) + "\n"
 }
 
 // Both surfaces resolve their settings the same way, so the resolution lives
