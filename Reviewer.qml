@@ -51,6 +51,16 @@ Item {
 
   property bool revealed: false
 
+  // Answers taken back, newest last. In memory and per sitting: undo is for
+  // the grade you just fumbled, not a history you carry between sessions, and
+  // a snapshot from an hour ago could no longer be true after the other
+  // surface has been answering the same deck.
+  property var undoStack: []
+  readonly property bool canUndo: root.undoStack.length > 0
+
+  // Set by undo so the next rebuild puts that card back in front of you.
+  property string pinned: ""
+
   // Re-derived on every tick as well as on every answer, so a card that comes
   // due mid-session appears without the user doing anything.
   property var stats: Anki.counts(root.cards, root.progress, root.now, root.newPerDay)
@@ -90,6 +100,7 @@ Item {
     if (root.active) {
       root.revealed = false
       root.answered = 0
+      root.undoStack = []
       root.reload()
     }
   }
@@ -113,7 +124,17 @@ Item {
 
   function rebuild() {
     root.refresh()
-    root.queue = Anki.buildQueue(root.cards, root.progress, root.now, root.newPerDay)
+    var queue = Anki.buildQueue(root.cards, root.progress, root.now, root.newPerDay)
+
+    // Only pin a card the session can actually show: a filter change could
+    // have removed it, and a queue holding an id with no card behind it would
+    // leave the surface with nothing to render.
+    if (root.pinned) {
+      if (root.cardById(root.pinned)) queue = Anki.promote(queue, root.pinned)
+      root.pinned = ""
+    }
+
+    root.queue = queue
     root.revealed = false
   }
 
@@ -140,6 +161,18 @@ Item {
     // itself changes.
     var reviews = {}
     for (var key in root.progress.reviews) reviews[key] = root.progress.reviews[key]
+
+    // Snapshot before the write. `had` separates a card with no history at all
+    // from one whose history merely looks new, so taking back a card's first
+    // answer removes its entry instead of leaving a zeroed one behind — which
+    // would otherwise count against the day's new-card allowance forever.
+    root.undoStack = root.undoStack.concat([{
+      id: id,
+      had: Object.prototype.hasOwnProperty.call(reviews, id),
+      before: before,
+      introduced: root.progress.introduced
+    }]).slice(-Anki.UNDO_DEPTH)
+
     reviews[id] = after
 
     var introduced = root.progress.introduced + (before.phase === "new" ? 1 : 0)
@@ -149,6 +182,32 @@ Item {
     root.save()
     root.rebuild()
     root.graded(g)
+  }
+
+  // Take back the last answer. The card returns to exactly the state it was in
+  // before, and comes back revealed and in front of you — you undid because
+  // the grade was wrong, so the next keystroke should be able to be the right
+  // one.
+  function undo() {
+    if (!root.undoStack.length) return
+
+    var stack = root.undoStack.slice()
+    var last = stack.pop()
+    root.undoStack = stack
+
+    var reviews = {}
+    for (var key in root.progress.reviews) reviews[key] = root.progress.reviews[key]
+    if (last.had) reviews[last.id] = last.before
+    else delete reviews[last.id]
+
+    root.progress = { day: root.progress.day, introduced: last.introduced, reviews: reviews }
+    root.answered = Math.max(0, root.answered - 1)
+    root.save()
+
+    root.pinned = last.id
+    root.rebuild()
+    // After the rebuild, which clears it.
+    root.revealed = true
   }
 
   // --------------------------------------------------------------- loading
@@ -222,6 +281,12 @@ Item {
     if (!root.pendingSave || writer.running) return
     writer.document = root.pendingSave
     root.pendingSave = ""
+    // Reopened for every write. Closing stdin is how the document is
+    // terminated (see below), and a Process keeps that setting, so without
+    // this the second save of a session starts a `cat` that blocks forever on
+    // a stdin nobody will write to — leaving `running` true and silently
+    // dropping every save after the first.
+    writer.stdinEnabled = true
     writer.running = true
   }
 
@@ -235,6 +300,7 @@ Item {
       document = ""
       // Closing stdin is what tells `cat` the document is finished; without
       // it the write never completes and the next save never starts.
+      // flushSave reopens it before each run.
       stdinEnabled = false
     }
     onExited: root.flushSave()

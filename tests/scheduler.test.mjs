@@ -22,7 +22,7 @@ const EXPORTS = [
   "newState", "normalizeState", "grade", "previewIntervals", "formatInterval",
   "dayKey", "hashId", "parseDeck", "emptyProgress", "parseProgress", "rollDay",
   "stateFor", "buildQueue", "counts", "serializeProgress", "findEntry",
-  "resolveDeck", "sanePerDay", "normalizeTags", "filterByTags", "sectionLabel",
+  "resolveDeck", "sanePerDay", "normalizeTags", "filterByTags", "sectionLabel", "promote", "UNDO_DEPTH",
   "READ_SH", "WRITE_SH",
 ]
 const G = {}
@@ -275,6 +275,44 @@ group("the queue")
   }
   t("a learning card not yet due is waiting, not due",
     G.counts(cards, learning, NOW, 0).waiting === 1 && G.counts(cards, learning, NOW, 0).due === 0)
+}
+
+group("promoting a card for undo")
+{
+  t("an already-queued card moves to the front",
+    G.promote(["a", "b", "c"], "c").join(",") === "c,a,b")
+  t("it is not duplicated", G.promote(["a", "b", "c"], "c").length === 3)
+  t("a card the rebuild dropped is inserted",
+    G.promote(["a", "b"], "z").join(",") === "z,a,b")
+  t("the front card stays at the front", G.promote(["a", "b"], "a").join(",") === "a,b")
+  t("an empty queue yields just the card", G.promote([], "a").join(",") === "a")
+  t("no id leaves the queue alone", G.promote(["a", "b"], "").join(",") === "a,b")
+  t("the original queue is not mutated", (() => {
+    const q = ["a", "b", "c"]
+    G.promote(q, "c")
+    return q.join(",") === "a,b,c"
+  })())
+
+  t("undo depth is bounded", G.UNDO_DEPTH > 0 && G.UNDO_DEPTH <= 100)
+}
+
+group("undo restores what the answer changed")
+{
+  // The QML owns the stack, but the state arithmetic it puts back is this
+  // module's: an answer must be reconstructible from the snapshot alone.
+  const fresh = G.newState()
+  const answered = G.grade(fresh, "good", NOW)
+  t("an answer changes the state", answered.phase !== fresh.phase || answered.due !== fresh.due)
+  t("grading never mutates the state handed in",
+    fresh.phase === "new" && fresh.reps === 0 && fresh.due === 0)
+  t("so the pre-answer state is still a faithful snapshot",
+    JSON.stringify(fresh) === JSON.stringify(G.newState()))
+
+  const review = { phase: "review", due: NOW, interval: 10 * DAY, ease: 2500, reps: 5, lapses: 0, step: 0 }
+  const lapsed = G.grade(review, "again", NOW)
+  t("a lapse changes ease and interval", lapsed.ease !== review.ease && lapsed.interval !== review.interval)
+  t("and leaves the original untouched to restore from",
+    review.ease === 2500 && review.interval === 10 * DAY && review.lapses === 0)
 }
 
 group("the study day rolls over at 4am, not midnight")

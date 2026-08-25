@@ -418,6 +418,24 @@ function buildQueue(cards, progress, now, newPerDay) {
   return queue.concat(fresh)
 }
 
+// How many answers back you can walk. Deep enough that a misgrade noticed a
+// few cards later is still recoverable, bounded so a long session does not
+// accumulate snapshots without limit.
+var UNDO_DEPTH = 25
+
+// Put a card at the front of the queue, inserting it if the rebuild dropped
+// it. Undo uses this: the card you just took back has to be the next thing you
+// see, wherever the scheduler would otherwise have placed it.
+function promote(queue, id) {
+  var list = queue || []
+  if (!id) return list.slice()
+
+  var out = [id]
+  for (var i = 0; i < list.length; i++)
+    if (list[i] !== id) out.push(list[i])
+  return out
+}
+
 // Headline numbers for the bar and the panel. `waiting` is a card in learning
 // that is not due yet — the reason a session can be empty and still unfinished.
 function counts(cards, progress, now, newPerDay) {

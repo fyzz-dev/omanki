@@ -37,11 +37,29 @@ come back.
 |-----|------|
 | `space` / `enter` | Reveal the answer, then grade it Good |
 | `1` `2` `3` `4` | Again / Hard / Good / Easy |
+| `u` | Undo the last answer |
 | `r` | Reload the deck from disk |
 | `esc` | Close |
 
 Same keys on both surfaces. `Super + Ctrl + J` toggles the overlay; the bar
 glyph toggles the panel.
+
+## Undo
+
+`u` takes back the last answer. The card returns to exactly the state it was in
+— interval, ease, lapse count, and the day's new-card allowance — and comes
+back **revealed and in front of you**, so the next keystroke can be the grade
+you meant. Taking back a card's very first answer removes its history
+altogether rather than leaving a zeroed entry behind, so it counts as new
+again.
+
+You can walk back up to 25 answers. The stack lives in memory and is per
+sitting: it starts empty each time a surface opens, and each surface keeps its
+own. That is deliberate — undo is for the grade you just fumbled, and a
+snapshot from an hour ago may no longer be true after the other surface has
+been answering the same deck.
+
+`u undo` appears in the footer only when there is something to take back.
 
 ## Your deck
 

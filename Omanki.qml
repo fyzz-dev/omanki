@@ -132,6 +132,7 @@ Item {
           else if (k === "2") reviewer.answer("hard")
           else if (k === "3") reviewer.answer("good")
           else if (k === "4") reviewer.answer("easy")
+          else if (k === "u") reviewer.undo()
           else if (k === "r") reviewer.reload()
           else return
           event.accepted = true
@@ -244,9 +245,9 @@ Item {
           Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: reviewer.revealed
-                ? "1-4 grade  ·  space good  ·  r reload  ·  esc close"
-                : "space reveal  ·  r reload  ·  esc close"
+            text: (reviewer.revealed ? "1-4 grade  ·  space good" : "space reveal")
+                + (reviewer.canUndo ? "  ·  u undo" : "")
+                + "  ·  r reload  ·  esc close"
             color: root.foreground
             opacity: 0.4
             font.family: root.fontFamily
