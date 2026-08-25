@@ -547,7 +547,7 @@ group("settings are read from wherever the plugin is configured")
 
 group("settings resolution is shared by both surfaces")
 {
-  const HOME = "/home/yamz8"
+  const HOME = "/home/u"
   t("an unset deck falls back to the default",
     G.resolveDeck("", HOME) === HOME + "/.local/share/omanki/cards.json")
   t("an undefined deck falls back too",
