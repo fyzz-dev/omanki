@@ -1,5 +1,7 @@
 # omanki
 
+[![tests](https://github.com/yamz8/omanki/actions/workflows/tests.yml/badge.svg)](https://github.com/yamz8/omanki/actions/workflows/tests.yml)
+
 Spaced-repetition flashcards in the Omarchy bar, scheduled the way Anki
 schedules them.
 
@@ -14,22 +16,8 @@ one is answered in the other. Either way the loop is the same: question, space
 to reveal, then one of four grades, each labelled with when the card would
 come back.
 
-```
-󰘸 7        →     omanki                    7
-                 3 due · 4 new
+![omanki reviewing a card in the fullscreen overlay](preview.png)
 
-                 NEW
-
-                 ┌──────────────────────┐
-                 │  Toggle the scratchpad │
-                 │  ──────────────────── │
-                 │      Super + S         │
-                 └──────────────────────┘
-
-                 Again   Hard   Good   Easy
-                  1m      10m    10m    4d
-                  1        2      3      4
-```
 
 ## Install
 
