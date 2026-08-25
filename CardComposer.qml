@@ -18,6 +18,16 @@ Column {
 
   spacing: Style.spacing.md
 
+  // Escape has to be caught here, not by the overlay. The overlay's key
+  // catcher is a *sibling* of the content, so it only sees keys while it holds
+  // focus itself — and the moment a field takes focus for typing, nothing
+  // reaches it. This Column is a real ancestor of the fields, so an Escape
+  // they do not handle arrives here.
+  Keys.onEscapePressed: function(event) {
+    root.dismissed()
+    event.accepted = true
+  }
+
   function reset() {
     frontField.text = ""
     backField.text = ""

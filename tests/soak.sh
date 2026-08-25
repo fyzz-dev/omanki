@@ -26,6 +26,23 @@ set -uo pipefail
 PLUGIN=yamz8.omanki
 STATE="$HOME/.local/state/omarchy/omanki.json"
 STATE_DIR="$(dirname "$STATE")"
+DECK="$HOME/.local/share/omanki/cards.json"
+
+# The add-a-card tests write to the real deck, so it is put back on the way
+# out — including on an interrupt, since leaving someone's deck edited because
+# a test was cancelled would be worse than the test not running at all.
+DECK_BACKUP="$(mktemp)"
+[ -f "$DECK" ] && cp "$DECK" "$DECK_BACKUP"
+restore_deck() {
+  [ -s "$DECK_BACKUP" ] && cp "$DECK_BACKUP" "$DECK"
+  rm -f "$DECK_BACKUP"
+}
+trap restore_deck EXIT INT TERM
+
+# Anything the shell logged about this plugin while the soak ran. A view that
+# renders at all can still be throwing on every binding, and that never
+# reaches an assertion about a file.
+SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
 
 pass=0; fail=0
 ok()   { pass=$((pass+1)); echo "  ok   $1"; }
@@ -55,6 +72,32 @@ expect() { # label expected actual
   if [ "$2" = "$3" ]; then ok "$1 ($3)"; else bad "$1 — expected $2, got $3"; fi
 }
 
+# Every action here is asynchronous: a keystroke starts a read, a merge and a
+# write, and the file changes some time after the key is pressed. Asserting
+# after a fixed sleep tests the sleep, not the plugin — it fails when the
+# machine is busy and passes when it is not. So poll for the expected value and
+# report the last thing seen if it never arrives; a real failure still fails,
+# it just takes the timeout to say so.
+expect_soon() { # label expected probe-arg
+  local label="$1" want="$2" what="$3" got=""
+  for _ in $(seq 1 25); do
+    got="$(probe "$what")"
+    [ "$got" = "$want" ] && { ok "$label ($got)"; return; }
+    sleep 0.2
+  done
+  bad "$label — expected $want, got $got"
+}
+
+expect_deck_soon() { # label expected
+  local label="$1" want="$2" got=""
+  for _ in $(seq 1 25); do
+    got="$(deck_count)"
+    [ "$got" = "$want" ] && { ok "$label ($got)"; return; }
+    sleep 0.2
+  done
+  bad "$label — expected $want, got $got"
+}
+
 reveal_and_grade() { wtype " "; sleep 0.7; wtype "$1"; sleep 1.3; }
 key()              { wtype "$1"; sleep 1.3; }
 
@@ -64,6 +107,28 @@ overlay_toggle(){ omarchy-shell shell toggle "$PLUGIN" >/dev/null 2>&1; sleep 2.
 
 reset() { rm -f "$STATE"; sleep 0.4; }
 
+deck_count() {
+  python3 - "$DECK" <<'PY'
+import json, os, sys
+p = sys.argv[1]
+if not os.path.exists(p): print(0); raise SystemExit
+try:
+    d = json.load(open(p))
+except Exception:
+    print(-1); raise SystemExit
+cards = d if isinstance(d, list) else d.get("cards", [])
+print(len(cards))
+PY
+}
+
+# front, back, tags — enter moves between fields and commits from the last.
+type_card() {
+  wtype "$1"; sleep 0.3; wtype -k Return; sleep 0.3
+  wtype "$2"; sleep 0.3; wtype -k Return; sleep 0.3
+  [ -n "${3:-}" ] && { wtype "$3"; sleep 0.2; }
+  wtype -k Return; sleep 1.8
+}
+
 command -v wtype >/dev/null || { echo "wtype is required"; exit 2; }
 omarchy-shell "$PLUGIN" close >/dev/null 2>&1
 
@@ -71,21 +136,21 @@ group "many answers in one session all persist"
 # The writer bug dropped everything after the first.
 reset; panel_open
 reveal_and_grade 3
-expect "one answer saved"    1 "$(probe answered)"
+expect_soon "one answer saved"    1 answered
 reveal_and_grade 3
-expect "two answers saved"   2 "$(probe answered)"
+expect_soon "two answers saved"   2 answered
 reveal_and_grade 4
-expect "three answers saved" 3 "$(probe answered)"
+expect_soon "three answers saved" 3 answered
 reveal_and_grade 1
-expect "four answers saved"  4 "$(probe answered)"
+expect_soon "four answers saved"  4 answered
 
 group "undo walks back and re-answering moves forward again"
 key u
-expect "undo takes one back"        3 "$(probe answered)"
+expect_soon "undo takes one back"        3 answered
 key u
-expect "undo again takes another"   2 "$(probe answered)"
+expect_soon "undo again takes another"   2 answered
 reveal_and_grade 3
-expect "re-answering counts again"  3 "$(probe answered)"
+expect_soon "re-answering counts again"  3 answered
 panel_close
 
 group "the two surfaces do not erase each other"
@@ -96,8 +161,7 @@ panel_open                 # panel loads an empty document and keeps it
 overlay_toggle             # overlay opens on top; the panel stays live
 reveal_and_grade 4
 reveal_and_grade 4
-overlay_answers="$(probe answered)"
-expect "overlay answered two" 2 "$overlay_answers"
+expect_soon "overlay answered two" 2 answered
 overlay_ids="$(probe ids)"
 overlay_toggle             # close the overlay; the panel never reloaded
 reveal_and_grade 3         # panel answers from its stale copy
@@ -117,6 +181,58 @@ else
   bad "the panel's save erased:$missing (had $overlay_ids, now $final_ids)"
 fi
 panel_close
+
+group "cards can be added, and added again"
+# The writer closes stdin after each document, which is what broke the progress
+# writer on its second use. One add cannot show that; two can.
+reset
+overlay_toggle
+base="$(deck_count)"
+wtype "a"; sleep 1.2                      # open the composer
+type_card "Soak card one" "answer one" ""
+expect_deck_soon "the first card is written" "$((base + 1))"
+type_card "Soak card two" "answer two" "soak"
+expect_deck_soon "the second card is written too" "$((base + 2))"
+type_card "Soak card three" "answer three" ""
+expect_deck_soon "and a third" "$((base + 3))"
+
+type_card "Soak card one" "a different answer" ""
+sleep 2   # nothing to wait for — let a wrongly-accepted add land before denying it
+expect "a duplicate front is refused" "$((base + 3))" "$(deck_count)"
+
+wtype -k Escape; sleep 0.8                # back to review
+
+group "a deck it cannot parse is left alone"
+printf '{ this is not json' > "$DECK"
+before_broken="$(md5sum "$DECK" | cut -d" " -f1)"
+wtype "a"; sleep 1.2
+type_card "Should not be written" "nope" ""
+sleep 2   # same: give a wrongly-accepted write time to happen
+after_broken="$(md5sum "$DECK" | cut -d" " -f1)"
+expect "the unparseable deck is untouched" "$before_broken" "$after_broken"
+wtype -k Escape; sleep 0.8
+cp "$DECK_BACKUP" "$DECK"; sleep 0.5
+wtype "r"; sleep 1.5                      # reload the restored deck
+
+# A refusal must not wedge the composer: proving the deck survived is only
+# half of it, since a permanently stuck `adding` flag would also leave the
+# file untouched and look identical from here.
+recovered_base="$(deck_count)"
+wtype "a"; sleep 1.2
+type_card "Soak card after refusal" "still working" ""
+expect_deck_soon "adding still works after a refusal" "$((recovered_base + 1))"
+wtype -k Escape; sleep 0.8
+cp "$DECK_BACKUP" "$DECK"; sleep 0.5
+
+group "the other views survive being opened"
+wtype "r"; sleep 1.5                      # pick up the restored deck
+wtype "s"; sleep 1.5                      # statistics
+ok "statistics opened"
+wtype "a"; sleep 1.2                      # composer from stats
+wtype -k Escape; sleep 0.8                # back to review
+reveal_and_grade 3
+expect_soon "reviewing still works after touring the views" 1 answered
+overlay_toggle
 
 group "nothing is left running or stranded"
 # Scoped to children of the shell, not a bare `pgrep -f`. A bare match also
@@ -144,6 +260,19 @@ stray="$(find "$STATE_DIR" -maxdepth 1 -name '.omanki.*' 2>/dev/null | wc -l)"
 expect "no temp files stranded" 0 "$stray"
 
 reset
+
+group "the shell logged no errors from this plugin"
+errs="$(journalctl --user --since "$SINCE" --no-pager 2>/dev/null \
+  | grep -iE "omanki|CardComposer|StatsView|Reviewer\.qml" \
+  | grep -iE "TypeError|ReferenceError|Cannot read|is not a function|Unable to assign|non-existent" \
+  | head -5)"
+if [ -z "$errs" ]; then
+  ok "no QML errors logged"
+else
+  bad "QML errors logged:"
+  echo "$errs" | sed "s/^/         /"
+fi
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -201,8 +201,18 @@ tests/soak.sh
 
 It needs a running `omarchy-shell` and `wtype`, and it takes the keyboard
 while it runs, so it is deliberately not part of the unit suite. Run it after
-any change to the save path, the surfaces, or the session lifecycle. Both
-historic bugs fail it.
+any change to the save path, the surfaces, or the session lifecycle. Every bug
+this plugin has shipped fails it.
+
+It covers repeated saves, undo, the two surfaces not erasing each other,
+adding several cards in a row, refusing a duplicate front, refusing an
+unparseable deck and recovering afterwards, and touring the views without
+breaking review. It also scans the shell's log, since a view can render and
+still throw on every binding without any file-based assertion noticing.
+
+The deck is backed up and restored on exit, including on an interrupt.
+Assertions poll rather than sleep: every action starts a read, a merge and a
+write, so a fixed sleep tests the machine's mood rather than the plugin.
 
 ## Layout
 
