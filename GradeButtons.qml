@@ -52,6 +52,7 @@ Row {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         horizontalAlignment: Text.AlignHCenter
         text: (root.reviewer ? root.reviewer.preview[modelData.grade] : "") + "  " + modelData.key

@@ -82,11 +82,32 @@ plugin never writes your deck at all. When it does:
 
 Both files sit in directories anything running as you can write, while the
 shell reading them is a long-lived process shared by the whole desktop. So both
-are treated as untrusted input: reads refuse symlinks and anything that is not
-a regular file, open non-blocking so a planted FIFO cannot stall the shell, and
-stop at 256 KiB; writes send the document over stdin so nothing is interpolated
-into a shell, and land via a fresh 0600 file renamed over the destination,
-which replaces a symlink instead of following it.
+are treated as untrusted input, and **both must live inside your home
+directory** — a path outside it is refused rather than attempted.
+
+Guarding the file is not enough on its own: `mkdir -p`, `mktemp` and `mv` all
+follow a directory symlink, so a link planted at any component of a predictable
+path — `~/.local`, `~/.local/state`, `~/.local/state/omarchy` — would redirect
+the whole operation. So the helpers walk the chain one component at a time,
+refusing any symlink and requiring a directory you own, then pin the final
+directory with a file descriptor and verify what they pinned, doing every
+subsequent operation through it. A directory swapped in after the walk cannot
+move the write.
+
+Directories that already exist keep their modes — `~/.local` is shared with
+every other application and is not a plugin's to tighten. Only directories the
+plugin creates are set private (0700), and the data files themselves are 0600.
+
+Reads additionally refuse anything that is not a regular file and open
+non-blocking, so a planted FIFO cannot stall the shell, stopping at 256 KiB.
+Writes send the document over stdin, so nothing in a card is ever interpolated
+into a shell, and land via a fresh 0600 temp file renamed over the destination.
+
+Card text is displayed with `Text.PlainText` at every sink. Decks are shared
+and imported, and Qt's default `AutoText` interprets anything that looks like
+markup — which would let a crafted card make the shell load remote or local
+resources. The parser deliberately does **not** strip markup: a card teaching
+HTML should survive intact, so safety belongs to the renderer.
 
 ### Placing it and binding it
 

@@ -196,6 +196,7 @@ Item {
 
             iconComponent: Component {
               Text {
+                textFormat: Text.PlainText
                 text: "󰘸"
                 color: root.foreground
                 font.family: root.fontFamily
@@ -208,6 +209,7 @@ Item {
                 spacing: Style.spacing.lg
 
                 Text {
+                  textFormat: Text.PlainText
                   anchors.verticalCenter: parent.verticalCenter
                   visible: reviewer.answered > 0
                   text: "Done " + reviewer.answered
@@ -218,6 +220,7 @@ Item {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   anchors.verticalCenter: parent.verticalCenter
                   text: String(reviewer.stats ? reviewer.stats.pending : 0)
                   color: (reviewer.stats && reviewer.stats.pending > 0) ? Color.accent : root.foreground
@@ -235,6 +238,7 @@ Item {
           }
 
           PanelSectionHeader {
+            textFormat: Text.PlainText
             width: parent.width
             text: root.mode === "stats" ? "STATISTICS"
                 : root.mode === "add" ? "ADD A CARD"
@@ -298,6 +302,7 @@ Item {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             visible: root.mode === "review"
@@ -311,6 +316,7 @@ Item {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             visible: root.mode === "stats"

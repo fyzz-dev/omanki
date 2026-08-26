@@ -8,7 +8,8 @@
 // are run as such.
 
 import { execFileSync, spawnSync } from "node:child_process"
-import { lstatSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
+         statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -25,7 +26,7 @@ const EXPORTS = [
   "mergeProgress", "introducedToday", "reviewsToday", "remainingToday",
   "deckStats", "percent", "appendCard", "dirOf", "baseOf", "MATURE_INTERVAL",
   "resolveDeck", "sanePerDay", "normalizeTags", "filterByTags", "sectionLabel", "promote", "UNDO_DEPTH",
-  "READ_SH", "WRITE_SH",
+  "READ_SH", "WRITE_SH", "relativeToHome",
 ]
 const G = {}
 new Function("exports", `${src}\nfor (const k of ${JSON.stringify(EXPORTS)}) exports[k] = eval(k)`)(G)
@@ -569,63 +570,157 @@ group("settings resolution is shared by both surfaces")
 
 // --------------------------------------------------------------- file I/O
 //
-// READ_SH and WRITE_SH are plain sh, so they are run as plain sh. What is
-// being checked is the hardening: that neither can be pointed at a file it was
-// not meant to touch.
+// READ_SH and WRITE_SH are plain sh, so they are run as plain sh against real
+// directories. What is being checked is that neither can be pointed at a file
+// it was not meant to touch — including by a symlink planted at any component
+// of the path, not merely at the file itself.
 
-group("reading refuses what it should")
-{
-  const dir = mkdtempSync(join(tmpdir(), "omanki-"))
-  const read = (path) =>
-    execFileSync("sh", ["-c", G.READ_SH, "omanki", path], { encoding: "utf8" })
+const sh = (script, home, rel, input) =>
+  spawnSync("sh", ["-c", script, "omanki", home, rel],
+            { input: input ?? "", encoding: "utf8" })
 
-  writeFileSync(join(dir, "deck.json"), '{"cards":[]}\n')
-  t("a regular file is read", read(join(dir, "deck.json")).trim() === '{"cards":[]}')
-  t("a missing file is empty, not an error", read(join(dir, "nope.json")) === "")
+const REL = ".local/state/omarchy/omanki.json"
+const CHAIN = [".local", ".local/state", ".local/state/omarchy"]
 
-  writeFileSync(join(dir, "secret"), "not yours\n")
-  symlinkSync(join(dir, "secret"), join(dir, "link.json"))
-  t("a symlink is refused", read(join(dir, "link.json")) === "")
-
-  t("a directory is refused", read(dir) === "")
-
-  writeFileSync(join(dir, "big.json"), "x".repeat(500_000))
-  t("an oversized file is truncated, not swallowed whole",
-    read(join(dir, "big.json")).length === 262_144)
+// A home with the chain already present, so a test can replace one link of it.
+function makeHome() {
+  const home = mkdtempSync(join(tmpdir(), "omanki-home-"))
+  mkdirSync(join(home, ".local/state/omarchy"), { recursive: true })
+  return home
 }
 
-group("writing cannot be redirected")
+function makeDecoy() {
+  const dir = mkdtempSync(join(tmpdir(), "omanki-decoy-"))
+  writeFileSync(join(dir, "omanki.json"), "untouched\n")
+  return dir
+}
+
+group("writing creates its own chain, privately")
 {
-  const dir = mkdtempSync(join(tmpdir(), "omanki-"))
-  const write = (target, name, doc) =>
-    spawnSync("sh", ["-c", G.WRITE_SH, "omanki", target, name], { input: doc, encoding: "utf8" })
+  const home = mkdtempSync(join(tmpdir(), "omanki-fresh-"))
+  const doc = G.serializeProgress({ reviews: {} })
+  const r = sh(G.WRITE_SH, home, REL, doc)
 
-  const doc = G.serializeProgress({ day: "2026-01-15", introduced: 1, reviews: {} })
-  const ok = write(join(dir, "state"), "omanki.json", doc)
-  t("a normal write succeeds", ok.status === 0)
-  t("the document lands intact",
-    readFileSync(join(dir, "state", "omanki.json"), "utf8") === doc)
-  t("the file is private", (statSync(join(dir, "state", "omanki.json")).mode & 0o777) === 0o600)
+  t("a write into an empty home succeeds", r.status === 0)
+  t("the document lands intact", readFileSync(join(home, REL), "utf8") === doc)
+  t("the file is private", (statSync(join(home, REL)).mode & 0o777) === 0o600)
+  for (const d of CHAIN)
+    t(`${d} is created private`, (statSync(join(home, d)).mode & 0o777) === 0o700)
+  t("no temp file is left behind",
+    readdirSync(join(home, ".local/state/omarchy")).filter((f) => f.startsWith(".omanki.")).length === 0)
+}
 
-  t("a path separator in the name is refused", write(dir, "../escape.json", doc).status === 64)
-  t("an empty name is refused", write(dir, "", doc).status === 64)
+group("directories that already exist keep their modes")
+{
+  // ~/.local and ~/.config are shared with every other application. Tightening
+  // them because a flashcard plugin happened to walk past would be overreach.
+  const home = mkdtempSync(join(tmpdir(), "omanki-modes-"))
+  mkdirSync(join(home, ".local"), { recursive: true, mode: 0o755 })
+  chmodSync(join(home, ".local"), 0o755)
 
-  // The real defence: a planted symlink at the destination is replaced, not
-  // followed, so a write cannot be aimed at a file elsewhere.
-  const outside = join(dir, "outside.json")
-  writeFileSync(outside, "untouched\n")
-  symlinkSync(outside, join(dir, "state", "planted.json"))
-  t("a planted symlink is replaced, not followed",
-    write(join(dir, "state"), "planted.json", doc).status === 0 &&
-    readFileSync(outside, "utf8") === "untouched\n" &&
-    !lstatSync(join(dir, "state", "planted.json")).isSymbolicLink())
+  const r = sh(G.WRITE_SH, home, REL, "{}\n")
+  t("the write still succeeds", r.status === 0)
+  t("an existing directory is left as it was",
+    (statSync(join(home, ".local")).mode & 0o777) === 0o755)
+  t("but one we create is still private",
+    (statSync(join(home, ".local/state")).mode & 0o777) === 0o700)
+}
 
-  // Cards are user text and end up inside the document; nothing about it is
-  // interpolated into the shell, so quoting in a card cannot escape.
-  const nasty = JSON.stringify({ day: "x", introduced: 0, reviews: { "a\"; rm -rf /; #": G.newState() } })
-  const hostile = write(join(dir, "state"), "hostile.json", nasty)
+group("a symlink planted at any component redirects nothing")
+{
+  // The whole point: guarding the final file is worthless if the walk to it
+  // was already diverted. Each component gets its turn as the planted link.
+  for (const component of CHAIN) {
+    const home = makeHome()
+    const decoy = makeDecoy()
+
+    rmSync(join(home, component), { recursive: true, force: true })
+    symlinkSync(decoy, join(home, component))
+
+    const w = sh(G.WRITE_SH, home, REL, '{"reviews":{"pwned":{}}}\n')
+    const r = sh(G.READ_SH, home, REL)
+
+    t(`write is refused when ${component} is a symlink`, w.status === 65)
+    t(`  the decoy file is untouched (${component})`,
+      readFileSync(join(decoy, "omanki.json"), "utf8") === "untouched\n")
+    t(`  no temp file is stranded beside the decoy (${component})`,
+      readdirSync(decoy).filter((f) => f.startsWith(".omanki.")).length === 0)
+    t(`  read is refused too (${component})`, r.status === 65 && r.stdout === "")
+  }
+}
+
+group("a symlinked file, and a file where a directory belongs")
+{
+  const home = makeHome()
+  const decoy = makeDecoy()
+
+  symlinkSync(join(decoy, "omanki.json"), join(home, REL))
+  t("a symlinked target file is refused on read", sh(G.READ_SH, home, REL).status === 65)
+
+  const w = sh(G.WRITE_SH, home, REL, '{"reviews":{}}\n')
+  t("but a write replaces the symlink instead of following it", w.status === 0)
+  t("the decoy is untouched", readFileSync(join(decoy, "omanki.json"), "utf8") === "untouched\n")
+  t("and the destination is now a real file",
+    !lstatSync(join(home, REL)).isSymbolicLink())
+
+  const home2 = mkdtempSync(join(tmpdir(), "omanki-file-"))
+  mkdirSync(join(home2, ".local"), { recursive: true })
+  writeFileSync(join(home2, ".local/state"), "i am not a directory\n")
+  t("a regular file where a directory belongs is refused",
+    sh(G.WRITE_SH, home2, REL, "{}\n").status === 66)
+}
+
+group("paths that walk out of home are refused before any work")
+{
+  const home = makeHome()
+  for (const [label, rel] of [
+    ["an absolute path", "/etc/passwd"],
+    ["a parent traversal", ".local/../../etc/passwd"],
+    ["a bare traversal", "../escape.json"],
+    ["an empty path", ""],
+  ]) t(`${label} is refused`, sh(G.WRITE_SH, home, rel, "{}\n").status === 64)
+
+  t("containment is decided before the shell runs",
+    G.relativeToHome("/etc/passwd", "/home/u") === "")
+  t("a contained path is returned relative",
+    G.relativeToHome("/home/u/.local/share/omanki/cards.json", "/home/u") === ".local/share/omanki/cards.json")
+  t("home itself is not a file", G.relativeToHome("/home/u", "/home/u") === "")
+  t("a sibling that merely shares a prefix is refused",
+    G.relativeToHome("/home/user2/deck.json", "/home/u") === "")
+  t("a traversal inside a contained path is refused",
+    G.relativeToHome("/home/u/../etc/passwd", "/home/u") === "")
+  t("a trailing slash on home is tolerated",
+    G.relativeToHome("/home/u/a.json", "/home/u/") === "a.json")
+  t("a relative path is refused", G.relativeToHome("a.json", "/home/u") === "")
+}
+
+group("reading, when there is simply nothing there")
+{
+  const home = mkdtempSync(join(tmpdir(), "omanki-empty-"))
+  t("an unwalked chain reads as empty, not as an error",
+    (() => { const r = sh(G.READ_SH, home, REL); return r.status === 0 && r.stdout === "" })())
+
+  const home2 = makeHome()
+  t("a missing file reads as empty",
+    (() => { const r = sh(G.READ_SH, home2, REL); return r.status === 0 && r.stdout === "" })())
+
+  writeFileSync(join(home2, REL), '{"reviews":{}}\n')
+  t("a regular file is read", sh(G.READ_SH, home2, REL).stdout.trim() === '{"reviews":{}}')
+
+  writeFileSync(join(home2, REL), "x".repeat(500_000))
+  t("an oversized file is truncated, not swallowed whole",
+    sh(G.READ_SH, home2, REL).stdout.length === 262_144)
+}
+
+group("the document itself is never interpolated")
+{
+  const home = makeHome()
+  // Cards are user text and end up inside the document; it travels on stdin,
+  // so quoting in a card cannot escape into the shell.
+  const nasty = JSON.stringify({ reviews: { 'a"; rm -rf /; #': G.newState() } })
+  const r = sh(G.WRITE_SH, home, REL, nasty)
   t("a document full of shell metacharacters is written verbatim",
-    hostile.status === 0 && readFileSync(join(dir, "state", "hostile.json"), "utf8") === nasty)
+    r.status === 0 && readFileSync(join(home, REL), "utf8") === nasty)
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

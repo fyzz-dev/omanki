@@ -96,6 +96,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.Wrap
     visible: !!(root.reviewer && root.reviewer.addError)
@@ -132,6 +133,7 @@ Column {
   }
 
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     horizontalAlignment: Text.AlignHCenter
     text: "enter moves on  ·  enter on tags saves  ·  esc back to review"

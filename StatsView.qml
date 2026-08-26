@@ -33,6 +33,7 @@ Column {
       spacing: Style.spacing.md
 
       Text {
+        textFormat: Text.PlainText
         text: root.total + " cards"
         color: root.foreground
         font.family: root.fontFamily
@@ -40,6 +41,7 @@ Column {
       }
 
       Text {
+        textFormat: Text.PlainText
         anchors.verticalCenter: parent.verticalCenter
         text: root.total ? Anki.percent(root.seen / root.total) + " seen" : ""
         color: root.foreground
@@ -92,6 +94,7 @@ Column {
         ]
 
         Text {
+          textFormat: Text.PlainText
           required property var modelData
           text: (root.stats ? (root.stats[modelData.key] || 0) : 0) + " " + modelData.label
           color: root.foreground
@@ -114,6 +117,7 @@ Column {
     spacing: Style.spacing.sm
 
     PanelSectionHeader {
+      textFormat: Text.PlainText
       width: parent.width
       text: "DUE OVER THE NEXT WEEK"
       foreground: root.foreground
@@ -167,6 +171,7 @@ Column {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: day.count > 0 ? String(day.count) : ""
@@ -177,6 +182,7 @@ Column {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: day.index === 0 ? "now" : "+" + day.index
@@ -217,6 +223,7 @@ Column {
         spacing: Style.spacing.xxs
 
         Text {
+          textFormat: Text.PlainText
           text: modelData.label
           color: root.foreground
           opacity: 0.45
@@ -225,6 +232,7 @@ Column {
         }
 
         Text {
+          textFormat: Text.PlainText
           text: modelData.value
           color: root.foreground
           font.family: root.fontFamily
@@ -237,6 +245,7 @@ Column {
   // Retention has no review log behind it, and saying so is cheaper than
   // letting someone read it as Anki's number.
   Text {
+    textFormat: Text.PlainText
     width: parent.width
     wrapMode: Text.Wrap
     text: "Retention is a lifetime figure per card — answers that never had to be relearned — not a rolling window."

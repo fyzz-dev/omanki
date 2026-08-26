@@ -103,6 +103,7 @@ Panel {
 
           iconComponent: Component {
             Text {
+              textFormat: Text.PlainText
               text: "󰘸"
               color: root.foreground
               font.family: root.fontFamily
@@ -117,6 +118,7 @@ Panel {
               spacing: Style.spacing.md
 
               Text {
+                textFormat: Text.PlainText
                 anchors.verticalCenter: parent.verticalCenter
                 visible: reviewer.answered > 0
                 text: "Done " + reviewer.answered
@@ -127,6 +129,7 @@ Panel {
               }
 
               Text {
+                textFormat: Text.PlainText
                 anchors.verticalCenter: parent.verticalCenter
                 text: String(root.pending)
                 color: root.pending > 0 ? Color.accent : root.foreground
@@ -144,6 +147,7 @@ Panel {
         }
 
         PanelSectionHeader {
+          textFormat: Text.PlainText
           width: parent.width
           text: Anki.sectionLabel(reviewer.phase, reviewer.currentState, root.tags)
           foreground: root.foreground
@@ -177,6 +181,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           horizontalAlignment: Text.AlignHCenter
           text: (reviewer.revealed ? "1-4 grade  ·  space good" : "space reveal")

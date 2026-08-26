@@ -700,41 +700,142 @@ function percent(fraction) {
 
 // ------------------------------------------------------------------ file I/O
 //
-// Both files live in directories the user — and anything else running as them
-// — can write, and the shell reading them is a long-lived process shared by
-// every panel. So they are treated as hostile input in both directions rather
-// than opened with the plain file API.
+// Both files live under the user's home, in predictable places, and the shell
+// that touches them is a long-lived process shared by the whole desktop. So
+// they are treated as hostile in both directions.
 //
-// Reading: refuse symlinks and anything that is not a regular file, open
-// non-blocking so a planted FIFO cannot stall the shell, and stop at 256 KiB
-// so an inflated file cannot be pulled into memory. Empty output means "no
-// file", which both parsers already treat as empty.
+// Guarding the *file* is not enough. `mkdir -p`, `mktemp` and `mv` all follow
+// a directory symlink, so a symlink planted at any component of a predictable
+// path — `~/.local`, `~/.local/state`, `~/.local/state/omarchy` — redirects
+// the whole operation and can make the shell replace a file somewhere else
+// entirely. The last path component being safe is worth nothing if the walk to
+// it was already diverted.
 //
-// $1 = path to read.
+// So both helpers walk the chain themselves, one component at a time, refusing
+// any symlink and requiring a directory the caller owns. They then pin the
+// final directory with `exec 9<` and verify what they pinned, and do every
+// subsequent operation through `/proc/self/fd/9` — a descriptor holds one
+// inode, so a directory swapped in after the walk cannot move the write. This
+// is the shell's version of the openat() dance.
+//
+// Containment is decided in JavaScript (see relativeToHome) and the helpers
+// are handed HOME plus a path relative to it, so no shell code has to reason
+// about escaping the home directory.
+
+// Directories that already exist keep their modes: `~/.local` and `~/.config`
+// are shared with every other application and are not a plugin's to tighten.
+// Only directories we create are ours to set, and those are private.
+var WALK_SH = [
+  'h="$1"; rel="$2"',
+  // A leading slash or any `..` would walk back out of home; the caller is
+  // supposed to have ruled both out already, so treat them as a bug, not input.
+  'case "$rel" in ""|/*) exit 64;; esac',
+  'case "/$rel/" in */../*) exit 64;; esac',
+  // HOME itself is resolved physically rather than walked: a distribution is
+  // entitled to make /home a symlink (Fedora Silverblue does), and that is
+  // configuration rather than an attack. Everything *below* home must be real.
+  'base=$(cd "$h" 2>/dev/null && pwd -P) || exit 64',
+  '[ -n "$base" ] || exit 64',
+  'name=${rel##*/}',
+  'dir=${rel%/*}',
+  '[ "$dir" = "$rel" ] && dir=""',
+  '[ -n "$name" ] || exit 64'
+].join("\n")
+
+// The pin, shared by both helpers. $d must already hold the target directory.
+var PIN_SH = [
+  'exec 9<"$d" || exit 69',
+  // Catches a component that was already a symlink when it was opened, which
+  // works precisely because everything below home was required to be physical.
+  '[ "$(readlink /proc/self/fd/9)" = "$d" ] || exit 70',
+  '[ -d /proc/self/fd/9 ] || exit 70',
+  '[ -O /proc/self/fd/9 ] || exit 70'
+].join("\n")
+
+// Reading. A missing file, a missing directory and a tampered path all mean
+// the same thing to the caller — there is nothing to load — but they are not
+// the same thing to the user, so tampering exits non-zero and the surface says
+// so rather than silently claiming an empty deck.
+//
+// The file itself is still opened no-follow and non-blocking so a planted FIFO
+// cannot stall the shell, and capped so an inflated file cannot be pulled into
+// memory.
+//
+// $1 = HOME, $2 = path relative to HOME.
 var READ_SH = [
-  'f="$1"',
-  '[ -L "$f" ] && exit 0',
+  WALK_SH,
+  'd="$base"',
+  'IFS="/"',
+  'for c in $dir; do',
+  '  [ -n "$c" ] || continue',
+  '  d="$d/$c"',
+  '  [ -L "$d" ] && exit 65',
+  '  [ -e "$d" ] || exit 0',
+  '  [ -d "$d" ] || exit 65',
+  '  [ -O "$d" ] || exit 65',
+  'done',
+  'unset IFS',
+  PIN_SH,
+  'f="/proc/self/fd/9/$name"',
+  '[ -L "$f" ] && exit 65',
   '[ -f "$f" ] || exit 0',
   'exec dd if="$f" iflag=nofollow,nonblock bs=262144 count=1 2>/dev/null'
 ].join("\n")
 
-// Writing: the document arrives on stdin, so nothing about it is interpolated
+// Writing. The document arrives on stdin, so nothing about it is interpolated
 // into the shell and no amount of quoting in a card can escape. It is built in
-// a fresh 0600 file that mktemp creates exclusively, then renamed onto the
-// destination — rename replaces a symlink instead of following it, so the
-// write cannot be redirected elsewhere, and a reader sees either the whole old
-// document or the whole new one.
+// a fresh 0600 file that mktemp creates exclusively *inside the pinned
+// directory*, then renamed onto the destination through the same descriptor —
+// rename replaces a symlink instead of following it, so a reader sees either
+// the whole old document or the whole new one.
 //
-// $1 = directory, $2 = file name within it.
+// Every failure has its own status so the tests can tell them apart.
+//
+// $1 = HOME, $2 = path relative to HOME.
 var WRITE_SH = [
-  'd="$1"; f="$2"',
-  'case "$f" in ""|.|..|*/*) exit 64;; esac',
-  'mkdir -p -m 700 "$d" || exit 65',
-  't=$(mktemp "$d/.omanki.XXXXXX") || exit 66',
-  'chmod 600 "$t" || { rm -f "$t"; exit 67; }',
-  'cat > "$t" || { rm -f "$t"; exit 68; }',
-  'mv -f "$t" "$d/$f" || { rm -f "$t"; exit 69; }'
+  WALK_SH,
+  'd="$base"',
+  'IFS="/"',
+  'for c in $dir; do',
+  '  [ -n "$c" ] || continue',
+  '  d="$d/$c"',
+  '  [ -L "$d" ] && exit 65',
+  '  if [ -e "$d" ]; then',
+  '    [ -d "$d" ] || exit 66',
+  '    [ -O "$d" ] || exit 67',
+  '  else',
+  // Not `mkdir -p`: the walk creates one level at a time so that every level
+  // is checked before the next is created.
+  '    mkdir -m 700 "$d" || exit 68',
+  '  fi',
+  'done',
+  'unset IFS',
+  PIN_SH,
+  't=$(mktemp "/proc/self/fd/9/.omanki.XXXXXX") || exit 71',
+  'chmod 600 "$t" || { rm -f "$t"; exit 72; }',
+  'cat > "$t" || { rm -f "$t"; exit 73; }',
+  'mv -f "$t" "/proc/self/fd/9/$name" || { rm -f "$t"; exit 74; }'
 ].join("\n")
+
+// Is `path` inside `home`, and where? Returns the path relative to home, or ""
+// when it is not contained — which the caller must treat as a refusal rather
+// than as a path to attempt. Doing this here rather than in shell keeps it
+// testable and keeps the helpers free of escape logic.
+function relativeToHome(path, home) {
+  var p = text(path)
+  var h = text(home).replace(/\/+$/, "")
+  if (!p || !h || p.charAt(0) !== "/") return ""
+  if (p.indexOf(h + "/") !== 0) return ""
+
+  var rel = p.slice(h.length + 1)
+  if (!rel) return ""
+  // `.` and `..` are refused outright rather than normalised: a path that
+  // needs normalising to look safe is not one to be clever about.
+  var parts = rel.split("/")
+  for (var i = 0; i < parts.length; i++)
+    if (parts[i] === "" || parts[i] === "." || parts[i] === "..") return ""
+  return rel
+}
 
 function serializeProgress(progress) {
   var p = progress || emptyProgress()

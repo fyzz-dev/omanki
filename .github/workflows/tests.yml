@@ -27,6 +27,12 @@ jobs:
       - name: Scheduler and file-handling tests
         run: node tests/scheduler.test.mjs
 
+      # Card text is imported content and Qt's Text defaults to AutoText, which
+      # interprets markup. These assert every sink forces plain text, so a Text
+      # added later cannot quietly reintroduce it.
+      - name: Rendering-safety tests
+        run: node tests/rendering.test.mjs
+
       # tests/soak.sh is deliberately not run here. It drives the real shell
       # with real keystrokes and needs a Wayland compositor, a running
       # omarchy-shell, and the keyboard focus of the machine it runs on. Every

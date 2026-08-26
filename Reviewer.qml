@@ -14,6 +14,15 @@ Item {
   // scheduling progress is written to.
   property string deckPath: ""
   property string stateDir: ""
+
+  readonly property string home: Quickshell.env("HOME")
+
+  // Both files must sit inside the home directory: the helpers walk the chain
+  // component by component and refuse symlinks, and a path outside home cannot
+  // be walked that way. Empty means refused, and no process is started for it.
+  readonly property string deckRel: Anki.relativeToHome(root.deckPath, root.home)
+  readonly property string progressRel:
+      Anki.relativeToHome(root.stateDir + "/omanki.json", root.home)
   property int newPerDay: 20
   // 0 means no cap. A limit you have not set should not be a limit of nothing.
   property int reviewsPerDay: 0
@@ -228,12 +237,31 @@ Item {
   }
 
   // --------------------------------------------------------------- loading
+  // A path the helpers will refuse is caught here, before any process runs, so
+  // the surface can say what is wrong instead of showing an empty deck.
+  function checkPaths() {
+    if (!root.deckRel) {
+      root.deckError = "Deck must be inside your home directory"
+      return false
+    }
+    root.deckError = ""
+    return true
+  }
+
   function reload() {
     // Cleared first so a rebuild waits for both files again. A reader already
     // in flight still sets its own flag when it finishes, so nothing is lost
     // by not restarting it.
     root.deckRead = false
     root.progressRead = false
+    if (!root.checkPaths()) {
+      root.deck = []
+      root.deckRead = true
+      root.progressRead = true
+      root.loaded = true
+      root.rebuild()
+      return
+    }
     if (!deckReader.running) deckReader.running = true
     if (!progressReader.running) progressReader.running = true
   }
@@ -251,7 +279,7 @@ Item {
 
   Process {
     id: deckReader
-    command: ["sh", "-c", Anki.READ_SH, "omanki-deck", root.deckPath]
+    command: ["sh", "-c", Anki.READ_SH, "omanki-deck", root.home, root.deckRel]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -259,7 +287,7 @@ Item {
         // exists but does not parse is one the user needs told about.
         if (!text.trim()) {
           root.deck = []
-          root.deckError = ""
+          if (!root.deckError) root.deckError = ""
         } else {
           var parsed = Anki.parseDeck(text)
           root.deck = parsed.cards
@@ -273,7 +301,7 @@ Item {
 
   Process {
     id: progressReader
-    command: ["sh", "-c", Anki.READ_SH, "omanki-progress", root.stateDir + "/omanki.json"]
+    command: ["sh", "-c", Anki.READ_SH, "omanki-progress", root.home, root.progressRel]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -316,7 +344,7 @@ Item {
   // hands the result to the writer.
   Process {
     id: merger
-    command: ["sh", "-c", Anki.READ_SH, "omanki-merge", root.stateDir + "/omanki.json"]
+    command: ["sh", "-c", Anki.READ_SH, "omanki-merge", root.home, root.progressRel]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -344,7 +372,7 @@ Item {
   Process {
     id: writer
     property string document: ""
-    command: ["sh", "-c", Anki.WRITE_SH, "omanki-write", root.stateDir, "omanki.json"]
+    command: ["sh", "-c", Anki.WRITE_SH, "omanki-write", root.home, root.progressRel]
     stdinEnabled: true
     onStarted: {
       write(document)
@@ -375,7 +403,7 @@ Item {
 
   Process {
     id: deckEditReader
-    command: ["sh", "-c", Anki.READ_SH, "omanki-deck-edit", root.deckPath]
+    command: ["sh", "-c", Anki.READ_SH, "omanki-deck-edit", root.home, root.deckRel]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -400,8 +428,7 @@ Item {
   Process {
     id: deckWriter
     property string document: ""
-    command: ["sh", "-c", Anki.WRITE_SH, "omanki-deck-write",
-              Anki.dirOf(root.deckPath), Anki.baseOf(root.deckPath)]
+    command: ["sh", "-c", Anki.WRITE_SH, "omanki-deck-write", root.home, root.deckRel]
     stdinEnabled: true
     onStarted: {
       write(document)
@@ -472,6 +499,7 @@ Item {
         spacing: Style.spacing.md
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           horizontalAlignment: Text.AlignHCenter
           wrapMode: Text.Wrap
@@ -491,6 +519,7 @@ Item {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           visible: root.revealed
           horizontalAlignment: Text.AlignHCenter
@@ -502,6 +531,7 @@ Item {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           visible: !root.revealed
           horizontalAlignment: Text.AlignHCenter
@@ -516,6 +546,7 @@ Item {
 
     // --------------------------------------------------------- other states
     Text {
+      textFormat: Text.PlainText
       width: parent.width
       visible: root.phase !== "reviewing"
       horizontalAlignment: Text.AlignHCenter
