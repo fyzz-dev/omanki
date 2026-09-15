@@ -22,7 +22,6 @@ come back.
 
 ![omanki reviewing a card in the fullscreen overlay](preview.png)
 
-
 ## Install
 
 ```bash
@@ -53,80 +52,7 @@ never writes one unless you add a card through the `a` composer.
 The fullscreen overlay is summoned by a keybind, which you add yourself — see
 [Placing it and binding it](#placing-it-and-binding-it) below.
 
-## Remove
-
-```bash
-omarchy plugin remove yamz8.omanki
-```
-
-That deletes `~/.config/omarchy/plugins/yamz8.omanki/` and drops the plugin's
-entry from `~/.config/omarchy/shell.json`, taking the bar widget with it.
-
-Three things it does not touch, so remove them by hand if you want them gone:
-
-- your deck, at `~/.local/share/omanki/cards.json`
-- your scheduling progress, at `~/.local/state/omarchy/omanki.json`
-- any keybind you added to `~/.config/hypr/bindings.lua`
-
-## Requirements
-
-Omarchy 4 (Quattro) or newer. No external dependencies, no packages to
-install, no network access, and no privileged operations — the plugin is QML
-and JavaScript running inside the existing `omarchy-shell` process, and uses
-only the shell's own `qs.Ui` and `qs.Commons` modules.
-
-`node` is needed to run the test suite, but never to use the plugin.
-
-### What it writes
-
-Worth knowing before you point this at your notes.
-
-**`~/.local/state/omarchy/omanki.json`** — scheduling progress, written on
-every answer. Entirely the plugin's own file.
-
-**`~/.local/share/omanki/cards.json`** — your deck. Only ever appended to, and
-only when you add a card through the `a` composer. If you never use it, the
-plugin never writes your deck at all. When it does:
-
-- existing cards keep their order and every field they carried, including ones
-  this plugin knows nothing about;
-- a deck it cannot parse is handed back untouched rather than overwritten —
-  that being the one unrecoverable thing it could do;
-- a duplicate front is refused, since a card is identified by its front and two
-  would share a single schedule;
-- **your formatting is not preserved.** The file is reserialized at two-space
-  indent, so hand-tuned whitespace does not survive an in-app add.
-
-Both files sit in directories anything running as you can write, while the
-shell reading them is a long-lived process shared by the whole desktop. So both
-are treated as untrusted input, and **both must live inside your home
-directory** — a path outside it is refused rather than attempted.
-
-Guarding the file is not enough on its own: `mkdir -p`, `mktemp` and `mv` all
-follow a directory symlink, so a link planted at any component of a predictable
-path — `~/.local`, `~/.local/state`, `~/.local/state/omarchy` — would redirect
-the whole operation. So the helpers walk the chain one component at a time,
-refusing any symlink and requiring a directory you own, then pin the final
-directory with a file descriptor and verify what they pinned, doing every
-subsequent operation through it. A directory swapped in after the walk cannot
-move the write.
-
-Directories that already exist keep their modes — `~/.local` is shared with
-every other application and is not a plugin's to tighten. Only directories the
-plugin creates are set private (0700), and the data files themselves are 0600.
-
-Reads additionally refuse anything that is not a regular file and open
-non-blocking, so a planted FIFO cannot stall the shell, stopping at 256 KiB.
-Writes send the document over stdin, so nothing in a card is ever interpolated
-into a shell, and land via a fresh 0600 temp file renamed over the destination.
-
-Card text is displayed with `Text.PlainText` at every sink. Decks are shared
-and imported, and Qt's default `AutoText` interprets anything that looks like
-markup — which would let a crafted card make the shell load remote or local
-resources. The parser deliberately does **not** strip markup: a card teaching
-HTML should survive intact, so safety belongs to the renderer.
-
-### Placing it and binding it
+## Placing it and binding it
 
 `omarchy plugin add --enable` offers to place the bar widget. If you skipped
 that, or want it somewhere else:
@@ -293,6 +219,29 @@ Note that settings are read when the shell builds the widget: adding a key to
 an existing entry did not take effect here until `omarchy restart shell`, even
 though layout changes hot-reload.
 
+## How the scheduling works
+
+SM-2, in the shape Anki uses it.
+
+A **new** card is shown after 1 minute, then after 10, then graduates to a
+1-day interval. *Easy* skips straight to 4 days. Nothing in this phase touches
+ease — a card you have not learned yet has no history to judge it by.
+
+A **review** card's interval is multiplied by its ease factor (2.5 to start).
+*Hard* multiplies by 1.2 and costs 150 ease, *Good* multiplies by the ease
+itself, *Easy* adds a 1.3 bonus and earns 150 ease. Ease is held between 1.3
+and 3.0. A passing grade always pushes the card further out than it was, even
+when the multiplier rounds to nothing.
+
+*Again* on a review card is a **lapse**: it costs 200 ease, halves the
+interval, and sends the card through a 10-minute relearning step. Coming out
+of relearning restores that halved interval rather than starting over at a
+day, so one slip does not erase months of spacing.
+
+The study day rolls over at **4am** local time, not midnight, so a card
+answered at 1am counts toward the day you are still awake in. That is what the
+`newPerDay` allowance is measured against.
+
 ## Troubleshooting
 
 **Everything disappeared after `omarchy refresh shell`.** That command resets
@@ -320,28 +269,78 @@ minute on its own.
 **A new setting had no effect.** Settings are read when the shell builds the
 widget, so a key added to an existing entry needs `omarchy restart shell`.
 
-## How the scheduling works
+## Requirements
 
-SM-2, in the shape Anki uses it.
+Omarchy 4 (Quattro) or newer. No external dependencies, no packages to
+install, no network access, and no privileged operations — the plugin is QML
+and JavaScript running inside the existing `omarchy-shell` process, and uses
+only the shell's own `qs.Ui` and `qs.Commons` modules.
 
-A **new** card is shown after 1 minute, then after 10, then graduates to a
-1-day interval. *Easy* skips straight to 4 days. Nothing in this phase touches
-ease — a card you have not learned yet has no history to judge it by.
+`node` is needed to run the test suite, but never to use the plugin.
 
-A **review** card's interval is multiplied by its ease factor (2.5 to start).
-*Hard* multiplies by 1.2 and costs 150 ease, *Good* multiplies by the ease
-itself, *Easy* adds a 1.3 bonus and earns 150 ease. Ease is held between 1.3
-and 3.0. A passing grade always pushes the card further out than it was, even
-when the multiplier rounds to nothing.
+### What it writes
 
-*Again* on a review card is a **lapse**: it costs 200 ease, halves the
-interval, and sends the card through a 10-minute relearning step. Coming out
-of relearning restores that halved interval rather than starting over at a
-day, so one slip does not erase months of spacing.
+Worth knowing before you point this at your notes.
 
-The study day rolls over at **4am** local time, not midnight, so a card
-answered at 1am counts toward the day you are still awake in. That is what the
-`newPerDay` allowance is measured against.
+**`~/.local/state/omarchy/omanki.json`** — scheduling progress, written on
+every answer. Entirely the plugin's own file.
+
+**`~/.local/share/omanki/cards.json`** — your deck. Only ever appended to, and
+only when you add a card through the `a` composer. If you never use it, the
+plugin never writes your deck at all. When it does:
+
+- existing cards keep their order and every field they carried, including ones
+  this plugin knows nothing about;
+- a deck it cannot parse is handed back untouched rather than overwritten —
+  that being the one unrecoverable thing it could do;
+- a duplicate front is refused, since a card is identified by its front and two
+  would share a single schedule;
+- **your formatting is not preserved.** The file is reserialized at two-space
+  indent, so hand-tuned whitespace does not survive an in-app add.
+
+Both files sit in directories anything running as you can write, while the
+shell reading them is a long-lived process shared by the whole desktop. So both
+are treated as untrusted input, and **both must live inside your home
+directory** — a path outside it is refused rather than attempted.
+
+Guarding the file is not enough on its own: `mkdir -p`, `mktemp` and `mv` all
+follow a directory symlink, so a link planted at any component of a predictable
+path — `~/.local`, `~/.local/state`, `~/.local/state/omarchy` — would redirect
+the whole operation. So the helpers walk the chain one component at a time,
+refusing any symlink and requiring a directory you own, then pin the final
+directory with a file descriptor and verify what they pinned, doing every
+subsequent operation through it. A directory swapped in after the walk cannot
+move the write.
+
+Directories that already exist keep their modes — `~/.local` is shared with
+every other application and is not a plugin's to tighten. Only directories the
+plugin creates are set private (0700), and the data files themselves are 0600.
+
+Reads additionally refuse anything that is not a regular file and open
+non-blocking, so a planted FIFO cannot stall the shell, stopping at 256 KiB.
+Writes send the document over stdin, so nothing in a card is ever interpolated
+into a shell, and land via a fresh 0600 temp file renamed over the destination.
+
+Card text is displayed with `Text.PlainText` at every sink. Decks are shared
+and imported, and Qt's default `AutoText` interprets anything that looks like
+markup — which would let a crafted card make the shell load remote or local
+resources. The parser deliberately does **not** strip markup: a card teaching
+HTML should survive intact, so safety belongs to the renderer.
+
+## Remove
+
+```bash
+omarchy plugin remove yamz8.omanki
+```
+
+That deletes `~/.config/omarchy/plugins/yamz8.omanki/` and drops the plugin's
+entry from `~/.config/omarchy/shell.json`, taking the bar widget with it.
+
+Three things it does not touch, so remove them by hand if you want them gone:
+
+- your deck, at `~/.local/share/omanki/cards.json`
+- your scheduling progress, at `~/.local/state/omarchy/omanki.json`
+- any keybind you added to `~/.config/hypr/bindings.lua`
 
 ## Tests
 
