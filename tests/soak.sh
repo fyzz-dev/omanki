@@ -33,11 +33,20 @@ DECK="$HOME/.local/share/omanki/cards.json"
 # a test was cancelled would be worse than the test not running at all.
 DECK_BACKUP="$(mktemp)"
 [ -f "$DECK" ] && cp "$DECK" "$DECK_BACKUP"
-restore_deck() {
+
+# The settings group edits the real shell.json, for the same reason the add
+# tests edit the real deck: a setting only reaches a surface by way of the
+# shell that reads it. Restored on the way out on every path.
+CONFIG="$HOME/.config/omarchy/shell.json"
+CONFIG_BACKUP="$(mktemp)"
+[ -f "$CONFIG" ] && cp "$CONFIG" "$CONFIG_BACKUP"
+
+restore_files() {
   [ -s "$DECK_BACKUP" ] && cp "$DECK_BACKUP" "$DECK"
-  rm -f "$DECK_BACKUP"
+  [ -s "$CONFIG_BACKUP" ] && cp "$CONFIG_BACKUP" "$CONFIG"
+  rm -f "$DECK_BACKUP" "$CONFIG_BACKUP"
 }
-trap restore_deck EXIT INT TERM
+trap restore_files EXIT INT TERM
 
 # Anything the shell logged about this plugin while the soak ran. A view that
 # renders at all can still be throwing on every binding, and that never
@@ -107,6 +116,37 @@ overlay_toggle(){ omarchy-shell shell toggle "$PLUGIN" >/dev/null 2>&1; sleep 2.
 
 reset() { rm -f "$STATE"; sleep 0.4; }
 
+# Settings are read when the shell builds a surface, so changing one means
+# restarting the shell and waiting for it to answer again rather than sleeping
+# a guessed number of seconds.
+wait_for_shell() {
+  for _ in $(seq 1 60); do
+    [ "$(omarchy-shell shell ping 2>/dev/null)" = "ok" ] && { sleep 1.5; return 0; }
+    sleep 0.5
+  done
+  return 1
+}
+
+restart_shell() {
+  omarchy restart shell >/dev/null 2>&1
+  wait_for_shell
+}
+
+# Write one setting onto this plugin's entry in shell.json. The value is JSON,
+# so a number stays a number and a list stays a list.
+set_setting() { # key json-value
+  python3 - "$CONFIG" "$PLUGIN" "$1" "$2" <<'PYEOF'
+import json, sys
+path, plugin, key, value = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+doc = json.load(open(path))
+for section in doc.get("bar", {}).get("layout", {}).values():
+    for entry in section:
+        if entry.get("id") == plugin:
+            entry[key] = json.loads(value)
+json.dump(doc, open(path, "w"), indent=2)
+PYEOF
+}
+
 deck_count() {
   python3 - "$DECK" <<'PY'
 import json, os, sys
@@ -131,6 +171,38 @@ type_card() {
 
 command -v wtype >/dev/null || { echo "wtype is required"; exit 2; }
 omarchy-shell "$PLUGIN" close >/dev/null 2>&1
+
+group "a configured setting reaches both surfaces"
+# Both surfaces are handed their settings by the shell, but not by the same
+# route: a bar widget is given its shell.json entry directly, while an overlay
+# has to find its own. The overlay looked for it on an object third-party
+# plugins are not given, so it quietly ran on defaults -- the deck it read, the
+# cards it introduced and the tag filter it applied were all the built-in ones
+# while the panel beside it honoured the file. Nothing about a default install
+# shows that: with no settings on the entry, the defaults are the right answer.
+#
+# So configure one and watch it bite. The new-card allowance is the cheapest
+# setting to see from outside: with two a day, a surface introduces two cards
+# and then has nothing left to show, however many the deck holds.
+set_setting newPerDay 2
+restart_shell || bad "shell did not come back after setting newPerDay"
+
+reset; panel_open
+reveal_and_grade 3
+reveal_and_grade 3
+reveal_and_grade 3
+expect_soon "the panel stops at the configured allowance"  2 answered
+panel_close
+
+reset; overlay_toggle
+reveal_and_grade 3
+reveal_and_grade 3
+reveal_and_grade 3
+expect_soon "the overlay stops at the same allowance"      2 answered
+overlay_toggle
+
+cp "$CONFIG_BACKUP" "$CONFIG"
+restart_shell || bad "shell did not come back after restoring the config"
 
 group "many answers in one session all persist"
 # The writer bug dropped everything after the first.

@@ -380,11 +380,14 @@ this plugin has shipped fails it.
 
 It covers repeated saves, undo, the two surfaces not erasing each other,
 adding several cards in a row, refusing a duplicate front, refusing an
-unparseable deck and recovering afterwards, and touring the views without
-breaking review. It also scans the shell's log, since a view can render and
-still throw on every binding without any file-based assertion noticing.
+unparseable deck and recovering afterwards, touring the views without breaking
+review, and a configured setting reaching both surfaces rather than only the
+one the shell hands its entry to. It also scans the shell's log, since a view
+can render and still throw on every binding without any file-based assertion
+noticing.
 
-The deck is backed up and restored on exit, including on an interrupt.
+The deck and `shell.json` are backed up and restored on exit, including on an
+interrupt.
 Assertions poll rather than sleep: every action starts a read, a merge and a
 write, so a fixed sleep tests the machine's mood rather than the plugin.
 

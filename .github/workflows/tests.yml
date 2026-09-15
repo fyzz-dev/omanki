@@ -35,7 +35,9 @@ jobs:
 
       # tests/soak.sh is deliberately not run here. It drives the real shell
       # with real keystrokes and needs a Wayland compositor, a running
-      # omarchy-shell, and the keyboard focus of the machine it runs on. Every
+      # omarchy-shell, and the keyboard focus of the machine it runs on. It
+      # also edits the real deck and the real shell.json, restoring both on
+      # every exit path. Every
       # bug this plugin has shipped was invisible to the suite above and caught
       # by that one, so a green badge here is not a claim that the surfaces
       # work — only that the rules underneath them do.
