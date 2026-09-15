@@ -1,4 +1,4 @@
-
+<img src="logo.png" width="96" alt="">
 
 # omanki
 
@@ -393,8 +393,8 @@ write, so a fixed sleep tests the machine's mood rather than the plugin.
 | `Omanki.qml` | The fullscreen overlay chrome around the same session. |
 
 `Reviewer` and `GradeButtons` know nothing about what is hosting them — the
-host owns sizing, the same way Snake's hosts own `cell` — so the rules and the
-review loop exist once rather than once per surface.
+host owns sizing — so the rules and the review loop exist once rather than once
+per surface.
 
 While a surface is on screen its session ticks every second, so a card due in
 a minute arrives on its own. While it is closed it ticks once a minute and

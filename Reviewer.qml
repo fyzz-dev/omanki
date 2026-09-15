@@ -41,9 +41,9 @@ Item {
   property string fontFamily: Style.font.family
 
   // How big the card reads and how much room it holds are the host's call, the
-  // way Snake's hosts own `cell`. The bar panel is a popup and sizes to its
-  // text; the fullscreen overlay is a study surface and wants a fixed, larger
-  // face that does not jump as answers change length.
+  // way a game board lets its host pick the cell size. The bar panel is a popup
+  // and sizes to its text; the fullscreen overlay is a study surface and wants a
+  // fixed, larger face that does not jump as answers change length.
   property int minFaceHeight: 0
   property real questionFontSize: Style.font.heading
   property real answerFontSize: Style.font.subtitle
