@@ -1,7 +1,5 @@
 
 
-https://github.com/user-attachments/assets/5f6f7fe7-9a2c-4d74-9281-ffa86d0405d3
-
 # omanki
 
 [![tests](https://github.com/yamz8/omanki/actions/workflows/tests.yml/badge.svg)](https://github.com/yamz8/omanki/actions/workflows/tests.yml)
@@ -19,6 +17,10 @@ Both run the same session and write the same progress, so a card answered in
 one is answered in the other. Either way the loop is the same: question, space
 to reveal, then one of four grades, each labelled with when the card would
 come back.
+
+https://github.com/user-attachments/assets/5f6f7fe7-9a2c-4d74-9281-ffa86d0405d3
+
+*The bar panel, mid-session — a deck of Omarchy's own keybindings.*
 
 ![omanki reviewing a card in the fullscreen overlay](preview.png)
 
