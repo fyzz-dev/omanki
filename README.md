@@ -1,8 +1,14 @@
-<img src="logo.png" width="96" alt="">
+<p align="center">
+  <img src="logo.png" width="96" alt="">
+</p>
 
-# omanki
+<h1 align="center">omanki</h1>
 
-[![tests](https://github.com/yamz8/omanki/actions/workflows/tests.yml/badge.svg)](https://github.com/yamz8/omanki/actions/workflows/tests.yml)
+<p align="center">
+  <a href="https://github.com/yamz8/omanki/actions/workflows/tests.yml">
+    <img src="https://github.com/yamz8/omanki/actions/workflows/tests.yml/badge.svg" alt="tests">
+  </a>
+</p>
 
 Spaced-repetition flashcards in the Omarchy bar, scheduled the way Anki
 schedules them.
