@@ -22,8 +22,6 @@ https://github.com/user-attachments/assets/5f6f7fe7-9a2c-4d74-9281-ffa86d0405d3
 
 *The bar panel, mid-session — a deck of Omarchy's own keybindings.*
 
-![omanki reviewing a card in the fullscreen overlay](preview.png)
-
 ## Install
 
 ```bash
@@ -71,6 +69,8 @@ The overlay has no default keybind. In `~/.config/hypr/bindings.lua`:
 ```lua
 o.bind("SUPER + CTRL + J", "omanki", "omarchy-shell shell toggle yamz8.omanki")
 ```
+
+![omanki reviewing a card in the fullscreen overlay](preview.png)
 
 Pick that key with care. `SUPER + CTRL + M` looks free and is not — it sits one
 modifier key away from Omarchy's stock `SUPER + SHIFT + M` "Music" binding, and
