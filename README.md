@@ -282,6 +282,13 @@ either. An untagged card is excluded whenever a filter is set. Both surfaces
 share the filter and show it in the header (`NEW · #verbs`), so a short session
 is never mistaken for an empty deck.
 
+Everything except `tags` is declared in `manifest.json` under `barWidget`, with
+types and ranges, so the shell knows the defaults without being told. `tags` is
+left out on purpose: a declared string field would be written as one value, and
+a filter is a *list* — `"verbs, food"` would be read as a single tag by that
+name and match nothing. It stays a hand-edited array until it can be offered
+as one honestly.
+
 Note that settings are read when the shell builds the widget: adding a key to
 an existing entry did not take effect here until `omarchy restart shell`, even
 though layout changes hot-reload.
