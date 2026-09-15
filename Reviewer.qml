@@ -564,11 +564,16 @@ Item {
         // An empty session means one of two different things, and sending
         // someone to edit a deck that is actually full would be a wild goose
         // chase.
+        //
+        // A deck ships with the plugin, but copying it is a manual step, so
+        // this is the screen a fresh install lands on. Naming the file here
+        // saves going back to the README to learn it exists.
         if (root.phase === "empty") {
           return root.deck.length
               ? "No cards match #" + Anki.normalizeTags(root.tags).join(" #") + ".\n"
                 + root.deck.length + " card" + (root.deck.length === 1 ? "" : "s") + " in the deck."
               : "No cards yet.\nAdd some to " + root.deckPath
+                + "\nor copy cards.example.json from the plugin folder."
         }
 
         if (root.phase === "waiting") return "Nothing due right now.\n"
