@@ -33,10 +33,19 @@ Item {
 
   // ------------------------------------------------------------- settings
   // Overlays are not handed a `settings` object the way bar widgets are, so
-  // find our own entry in shell.json. It is a live property, so editing the
-  // file re-evaluates this without a restart.
+  // find our own entry in shell.json ourselves.
+  //
+  // A third-party plugin is given a scoped facade, not the shell: it carries
+  // the bar config and not the whole document. Asking it for `shellConfig`
+  // yields undefined rather than an error, findEntry then matches nothing,
+  // and every setting quietly falls back to its default in this surface while
+  // the bar panel -- which is handed its entry directly -- honours them. The
+  // deck path going back to the default is the one that shows.
+  //
+  // It is a live property, so editing the file re-evaluates this without a
+  // restart.
   readonly property var pluginSettings: Anki.findEntry(
-    root.shell ? root.shell.shellConfig : null, root.pluginId)
+    root.shell ? { bar: root.shell.barConfig } : null, root.pluginId)
 
   readonly property string deckPath: Anki.resolveDeck(root.pluginSettings.deck, Quickshell.env("HOME"))
   readonly property int newPerDay: Anki.sanePerDay(root.pluginSettings.newPerDay)
