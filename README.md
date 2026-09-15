@@ -37,6 +37,19 @@ update later:
 omarchy plugin update yamz8.omanki
 ```
 
+A fresh install has no deck, so the panel opens on `No cards yet`. The repo
+ships one to start from — 33 cards covering Omarchy's own keybindings and
+commands, which is what the plugin was written to learn:
+
+```bash
+mkdir -p ~/.local/share/omanki
+cp ~/.config/omarchy/plugins/yamz8.omanki/cards.example.json \
+   ~/.local/share/omanki/cards.json
+```
+
+Copying it is the only time anything places a deck for you; the plugin itself
+never writes one unless you add a card through the `a` composer.
+
 The fullscreen overlay is summoned by a keybind, which you add yourself — see
 [Placing it and binding it](#placing-it-and-binding-it) below.
 
@@ -219,6 +232,10 @@ Cards live in `~/.local/share/omanki/cards.json`, which is yours to edit:
 A bare `[ ... ]` array works too. Entries missing a front or a back are
 skipped rather than shown blank, and the panel says so if the file does not
 parse. Press `r` in the panel, or just close and reopen it, to pick up edits.
+
+[`cards.example.json`](cards.example.json) in this repo is a working deck in
+this format — copy it as shown in [Install](#install), or read it as a worked
+example before writing your own.
 
 A card is identified by a hash of its **front**, not by its position in the
 file, so you can reorder the deck or fix a typo on the back without losing a

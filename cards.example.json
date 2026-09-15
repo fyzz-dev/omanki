@@ -1,0 +1,41 @@
+{
+  "cards": [
+    { "front": "Open a terminal", "back": "Super + Return", "tags": ["omarchy", "apps"] },
+    { "front": "Open the browser", "back": "Super + Shift + Return", "tags": ["omarchy", "apps"] },
+    { "front": "Open the file manager", "back": "Super + Shift + F", "tags": ["omarchy", "apps"] },
+    { "front": "Open the editor", "back": "Super + Shift + N", "tags": ["omarchy", "apps"] },
+
+    { "front": "Open the Omarchy menu", "back": "Super + Space", "tags": ["omarchy", "menus"] },
+    { "front": "Open the apps menu", "back": "Super + Alt + Space", "tags": ["omarchy", "menus"] },
+    { "front": "Show all keybindings", "back": "Super + K", "tags": ["omarchy", "menus"] },
+    { "front": "Open the system menu", "back": "Super + Escape", "tags": ["omarchy", "menus"] },
+    { "front": "Open the capture menu (screenshots, recording)", "back": "Super + Ctrl + C", "tags": ["omarchy", "menus"] },
+    { "front": "Open the theme menu", "back": "Super + Shift + Ctrl + Space", "tags": ["omarchy", "menus"] },
+    { "front": "Open the background switcher", "back": "Super + Ctrl + Space", "tags": ["omarchy", "menus"] },
+    { "front": "Open the emoji picker", "back": "Super + Ctrl + E", "tags": ["omarchy", "menus"] },
+    { "front": "Open the clipboard manager", "back": "Super + Ctrl + V", "tags": ["omarchy", "clipboard"] },
+
+    { "front": "Close the focused window", "back": "Super + W", "tags": ["omarchy", "windows"] },
+    { "front": "Toggle floating / tiling on a window", "back": "Super + T", "tags": ["omarchy", "windows"] },
+    { "front": "Fullscreen the focused window", "back": "Super + F", "tags": ["omarchy", "windows"] },
+    { "front": "Toggle the window split direction", "back": "Super + J", "tags": ["omarchy", "windows"] },
+    { "front": "Pop a window out (float and pin it)", "back": "Super + O", "tags": ["omarchy", "windows"] },
+    { "front": "Toggle the workspace layout", "back": "Super + L", "tags": ["omarchy", "windows"] },
+    { "front": "Move focus between windows", "back": "Super + arrow keys", "tags": ["omarchy", "windows"] },
+    { "front": "Swap the focused window left or right", "back": "Super + Shift + Left / Right", "tags": ["omarchy", "windows"] },
+
+    { "front": "Switch to workspace N", "back": "Super + 1…9 — Super + 0 for workspace 10", "tags": ["omarchy", "workspaces"] },
+    { "front": "Move the focused window to workspace N", "back": "Super + Shift + 1…9 — Super + Shift + 0 for workspace 10", "tags": ["omarchy", "workspaces"] },
+    { "front": "Go to the next workspace", "back": "Super + Tab", "tags": ["omarchy", "workspaces"] },
+    { "front": "Go back to the previous workspace you were on", "back": "Super + Ctrl + Tab", "tags": ["omarchy", "workspaces"] },
+    { "front": "Toggle the scratchpad", "back": "Super + S", "tags": ["omarchy", "workspaces"] },
+    { "front": "Toggle the top bar", "back": "Super + Shift + Space", "tags": ["omarchy", "workspaces"] },
+
+    { "front": "Change the Omarchy theme from a terminal", "back": "omarchy theme set <name>", "tags": ["omarchy", "cli"] },
+    { "front": "List every Omarchy command", "back": "omarchy commands", "tags": ["omarchy", "cli"] },
+    { "front": "Reset a config back to its defaults", "back": "omarchy refresh <app>  —  it backs up the current one first", "tags": ["omarchy", "cli"] },
+    { "front": "Set a desktop reminder in 15 minutes", "back": "omarchy reminder 15 \"Pickup Jack\"", "tags": ["omarchy", "cli"] },
+    { "front": "Install a package the Omarchy way", "back": "omarchy pkg add <pkg>", "tags": ["omarchy", "cli"] },
+    { "front": "Which directory must you never edit by hand?", "back": "/usr/share/omarchy — it is owned by the package and overwritten on every update. Edit ~/.config/ instead.", "tags": ["omarchy", "cli"] }
+  ]
+}
