@@ -293,6 +293,33 @@ Note that settings are read when the shell builds the widget: adding a key to
 an existing entry did not take effect here until `omarchy restart shell`, even
 though layout changes hot-reload.
 
+## Troubleshooting
+
+**Everything disappeared after `omarchy refresh shell`.** That command resets
+`~/.config/omarchy/shell.json` to Omarchy's defaults, and a third-party plugin
+is enabled by the presence of its id in that file — the shell's storage rules
+put it plainly: *a third-party plugin is enabled iff its id appears somewhere
+in shell.json*. Resetting the file takes omanki's entry with it, so the bar
+glyph goes and `Super + Ctrl + J` stops responding too; a disabled plugin is
+never summoned, and the only trace is one line in the shell's log. Nothing is
+lost — your deck and your progress are separate files and are untouched. Put
+it back with:
+
+```bash
+omarchy plugin enable yamz8.omanki
+```
+
+The config you had before is saved next to the new one as
+`~/.config/omarchy/shell.json.bak.<timestamp>`, if there was more in it than
+this one entry.
+
+**The count next to the glyph looks stale.** Press `r` in the panel to re-read
+the deck, or close and reopen it. A closed surface re-reads both files once a
+minute on its own.
+
+**A new setting had no effect.** Settings are read when the shell builds the
+widget, so a key added to an existing entry needs `omarchy restart shell`.
+
 ## How the scheduling works
 
 SM-2, in the shape Anki uses it.
