@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/5f6f7fe7-9a2c-4d74-9281-ffa86d0405d3
+
 # omanki
 
 [![tests](https://github.com/yamz8/omanki/actions/workflows/tests.yml/badge.svg)](https://github.com/yamz8/omanki/actions/workflows/tests.yml)
