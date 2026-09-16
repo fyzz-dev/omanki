@@ -111,14 +111,25 @@ same restart clears it.
 | `space` / `enter` | Reveal the answer, then grade it Good |
 | `1` `2` `3` `4` | Again / Hard / Good / Easy |
 | `u` | Undo the last answer |
-| `s` | Statistics (overlay only) |
-| `l` | Restore suspended leeches (overlay only) |
+| `s` | Statistics |
+| `←` `→` or `h` `l` | Move between statistics tabs (bar panel) |
+| `l` | Restore suspended leeches (overlay) |
 | `a` | Add a card (overlay only) |
 | `r` | Reload the deck from disk |
 | `esc` | Close |
 
-Same keys on both surfaces. `Super + Ctrl + J` toggles the overlay; the bar
-glyph toggles the panel.
+Same keys on both surfaces, apart from `a`: the composer is a form, and a form
+typed into a popup that closes when it loses focus is not a trade worth making.
+`Super + Ctrl + J` toggles the overlay; the bar glyph toggles the panel.
+
+`Tab` is left alone. It moves between bar panels, which is the shell's own
+convention and every other panel answers it that way — so the statistics tabs
+are walked with the arrow keys instead, which is what a row of tabs suggests.
+
+In the bar panel `h` and `l` walk them too, because the shell turns those into
+movement before any panel sees them. That is also why `l` cannot mean "restore"
+there the way it does in the overlay: the key never arrives. The panel's leech
+tab carries a button instead, which is the more discoverable of the two anyway.
 
 ## Undo
 
@@ -139,8 +150,23 @@ been answering the same deck.
 
 ## Statistics and adding cards
 
-`s` and `a` in the fullscreen overlay. Both live there rather than in the bar
-panel, which has room for a card and not much else.
+`s` on either surface, `a` in the overlay.
+
+The two statistics views show the same numbers and are laid out for the room
+they have. The overlay is a whole screen, so it puts the deck's composition,
+the week ahead, six figures and the leeches on one page. The panel is about a
+card wide, where that same page would be a column of squeezed rows saying
+everything badly — so it uses **tabs**: `DECK`, `DUE`, `TODAY`, and `LEECHES`
+once there is a leech to show. One thing at a time, each sized to the space
+actually there, and the strip says what else there is, which a scrolling column
+never does. Walk them with `←` and `→`, or click.
+
+The strip rides on the end of the `STATISTICS` line rather than sitting under
+it. A row of small-caps tabs directly below the small-caps word crowded both and
+spent a row of a panel that has few to spare.
+
+Both read the same numbers, so there is one calculation behind two
+presentations rather than two of either.
 
 **Statistics** shows the deck's composition — mature, young, learning, new —
 what falls due over the next seven days, and today's figures. Everything is
@@ -149,19 +175,20 @@ derived from the cards themselves; the plugin keeps no review log, so
 relearned) rather than Anki's rolling window, and the view says so rather than
 letting the number be misread.
 
-**Leeches** appear there too, but only once there are any — a deck without them
-says nothing about them. The line gives the count, how many are suspended, and
-`l` puts every suspended card back. That is deliberately the same view: there
-is no card browser to go hunting in, so the count and the way back have to be
-in one place or suspending would be a one-way door. Restoring keeps the leech
-mark, so a card that goes on lapsing is raised again at the next threshold
-rather than immediately.
+**Leeches** appear in both, but only once there are any — a deck without them
+says nothing about them, and in the panel the tab itself stays away. You get
+the count, how many are suspended, and a way to put every suspended card back:
+`l` in the overlay, or the button on the panel's leech tab. That is deliberately
+the same view as the count: there is no card browser to go hunting in, so the
+count and the way back have to be in one place or suspending would be a
+one-way door. Restoring keeps the leech mark, so a card that goes on lapsing is
+raised again at the next threshold rather than immediately.
 
 When a card becomes a leech mid-session, the surface says so at the moment it
-happens rather than letting the card quietly vanish. The bar panel has no
-statistics view, so there it points at the overlay.
+happens rather than letting the card quietly vanish.
 
-**Adding a card** takes a front, a back, and optional comma-separated tags;
+**Adding a card** is the overlay's alone, and takes a front, a back, and
+optional comma-separated tags;
 `enter` moves between fields and saves from the last one. The form clears and
 stays open, so a run of cards is one flow.
 
@@ -510,7 +537,9 @@ write, so a fixed sleep tests the machine's mood rather than the plugin.
 | `Reviewer.qml` | The session: deck, progress, queue, persistence, card face. |
 | `GradeButtons.qml` | The four priced grade buttons, shared by both surfaces. |
 | `CardComposer.qml` | The add-a-card form behind `a`, in the overlay only. |
-| `StatsView.qml` | The statistics behind `s`, including the leeches and the way back. |
+| `StatsView.qml` | The statistics behind `s` in the overlay, on one page. |
+| `PanelStats.qml` | The same numbers in tabs, for the width the bar panel has. |
+| `StatsTabs.qml` | The tab strip, which rides on the panel's section header. |
 | `Panel.qml` | The bar widget and the panel chrome around the session. |
 | `Omanki.qml` | The fullscreen overlay chrome around the same session. |
 

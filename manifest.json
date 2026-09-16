@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "yamz8.omanki",
   "name": "omanki",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "author": "yamz8",
   "license": "MIT",
   "description": "Spaced-repetition flashcards in the bar",
