@@ -91,10 +91,18 @@ omarchy menu keybindings --print | grep -i "SUPER CTRL"
 ```
 
 A note if you are hacking on this: the Omarchy shell hot-reloads plugin code,
-but a shell process that started *before* the plugin directory existed cannot
-load a newly added overlay entry point — Qt caches its view of the filesystem
-and reports it as a spurious "File name case mismatch". `omarchy restart shell`
-once after adding a new entry point, and hot-reload works normally from then on.
+but this plugin sets `keepLoaded: true` so the session survives between
+summons — which also means the shell holds the overlay instance across close
+and never rebuilds it from changed source. Editing a `.qml` and reopening
+shows you the old object; `omarchy-shell shell rescanPlugins` does not help
+either. Run `omarchy restart shell` to see a change. Setting `keepLoaded` to
+`false` restores ordinary save-and-reopen reloading if you want it while
+iterating, at the cost of a cold session each summon.
+
+Separately, a shell process that started *before* the plugin directory existed
+cannot load a newly added overlay entry point at all — Qt caches its view of
+the filesystem and reports it as a spurious "File name case mismatch". The
+same restart clears it.
 
 ## Keys
 
