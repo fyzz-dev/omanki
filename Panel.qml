@@ -19,6 +19,8 @@ Panel {
   readonly property int newPerDay: Anki.sanePerDay(root.setting("newPerDay", 20))
   readonly property var tags: Anki.normalizeTags(root.setting("tags", []))
   readonly property int reviewsPerDay: Anki.sanePerDay(root.setting("reviewsPerDay", 0), 0)
+  readonly property int leechThreshold: Anki.sanePerDay(root.setting("leechThreshold", Anki.LEECH_THRESHOLD), Anki.LEECH_THRESHOLD)
+  readonly property bool leechSuspend: root.setting("leechSuspend", true) !== false
   // The count is the point of the widget, but a bar that has to stay narrow
   // can turn it off and keep the glyph.
   readonly property bool showCount: root.setting("showCount", true) !== false
@@ -161,6 +163,8 @@ Panel {
           stateDir: Quickshell.env("HOME") + "/.local/state/omarchy"
           newPerDay: root.newPerDay
           reviewsPerDay: root.reviewsPerDay
+          leechThreshold: root.leechThreshold
+          leechSuspend: root.leechSuspend
           tags: root.tags
           active: root.opened
           foreground: root.foreground
@@ -184,9 +188,14 @@ Panel {
           textFormat: Text.PlainText
           width: parent.width
           horizontalAlignment: Text.AlignHCenter
-          text: (reviewer.revealed ? "1-4 grade  ·  space good" : "space reveal")
-              + (reviewer.canUndo ? "  ·  u undo" : "")
-              + "  ·  r reload  ·  esc close"
+          // The bar panel has no statistics view to restore from, so it says
+          // where the restoring lives rather than offering a key it does not
+          // have. Saying nothing would leave a card gone with no account of it.
+          text: reviewer.leechNotice
+              ? reviewer.leechNotice + "  ·  restore in the overlay"
+              : (reviewer.revealed ? "1-4 grade  ·  space good" : "space reveal")
+                + (reviewer.canUndo ? "  ·  u undo" : "")
+                + "  ·  r reload  ·  esc close"
           color: root.foreground
           opacity: 0.4
           font.family: root.fontFamily

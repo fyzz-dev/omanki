@@ -27,6 +27,16 @@ Item {
   // 0 means no cap. A limit you have not set should not be a limit of nothing.
   property int reviewsPerDay: 0
 
+  // How many times a card may be forgotten before it is treated as a leech.
+  // 0 turns leeches off. `leechSuspend` decides whether reaching it takes the
+  // card out of the rotation or only marks it.
+  property int leechThreshold: Anki.LEECH_THRESHOLD
+  property bool leechSuspend: true
+  readonly property var leechOpts: ({
+    leechThreshold: root.leechThreshold,
+    leechSuspend: root.leechSuspend
+  })
+
   // Restrict the session to cards carrying any of these tags. Empty means the
   // whole deck.
   property var tags: []
@@ -114,6 +124,18 @@ Item {
   property string addError: ""
   property bool adding: false
 
+  // Set when the last answer turned a card into a leech, and cleared a few
+  // seconds later. A card that silently disappears from the rotation is the
+  // one thing about leeches that would read as a bug rather than a decision,
+  // so the surface says it happened at the moment it happens.
+  property string leechNotice: ""
+
+  Timer {
+    id: leechNoticeTimer
+    interval: 6000
+    onTriggered: root.leechNotice = ""
+  }
+
   Component.onCompleted: root.reload()
 
   // Coming back is the moment to pick up deck edits made while the panel was
@@ -179,7 +201,16 @@ Item {
     // interval spreads once — at the moment the answer is committed — and the
     // priced labels above, which grade the same card without a roll, keep
     // showing a number that does not move while you decide.
-    var after = Anki.grade(before, g, root.now, Math.random())
+    var after = Anki.grade(before, g, root.now, Math.random(), root.leechOpts)
+
+    // Only on the answer that makes one. A card already marked stays marked,
+    // and re-answering it must not announce the same thing again.
+    if (after.leech && !before.leech) {
+      root.leechNotice = after.suspended
+          ? "Leech — suspended after " + after.lapses + " lapses"
+          : "Leech — forgotten " + after.lapses + " times"
+      leechNoticeTimer.restart()
+    }
 
     // Copied rather than mutated in place: `progress` is a var property, and
     // QML only re-evaluates the bindings that depend on it when the reference
@@ -204,6 +235,23 @@ Item {
     root.save()
     root.rebuild()
     root.graded(g)
+  }
+
+  // Put every suspended card back in the rotation. The leech mark itself is
+  // kept — the card has been trouble and the statistics should go on saying
+  // so — so a restored card that keeps lapsing is raised again at the next
+  // half-threshold rather than immediately.
+  //
+  // Returns how many came back, so the caller can say so rather than leaving
+  // the user to guess whether anything happened.
+  function restoreLeeches() {
+    var result = Anki.unsuspendAll(root.progress, root.now)
+    if (!result.restored) return 0
+
+    root.progress = result.progress
+    root.save()
+    root.rebuild()
+    return result.restored
   }
 
   // Take back the last answer. The card returns to exactly the state it was in
@@ -233,6 +281,12 @@ Item {
     root.progress = { reviews: reviews }
     root.answered = Math.max(0, root.answered - 1)
     root.save()
+
+    // Undoing the lapse that made a leech takes the mark back with it, since
+    // the whole prior state is restored — so a notice still on screen would be
+    // describing something that no longer happened.
+    root.leechNotice = ""
+    leechNoticeTimer.stop()
 
     root.pinned = last.id
     root.rebuild()

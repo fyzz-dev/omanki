@@ -27,6 +27,7 @@ const EXPORTS = [
   "deckStats", "percent", "appendCard", "dirOf", "baseOf", "MATURE_INTERVAL",
   "resolveDeck", "sanePerDay", "normalizeTags", "filterByTags", "sectionLabel", "promote", "UNDO_DEPTH",
   "READ_SH", "WRITE_SH", "relativeToHome", "READ_LIMIT", "fuzzInterval", "hitReadLimit",
+  "LEECH_THRESHOLD", "isLeechLapse", "leechConfig", "unsuspendAll",
 ]
 const G = {}
 new Function("exports", `${src}\nfor (const k of ${JSON.stringify(EXPORTS)}) exports[k] = eval(k)`)(G)
@@ -844,6 +845,194 @@ group("the document itself is never interpolated")
   const r = sh(G.WRITE_SH, home, REL, nasty)
   t("a document full of shell metacharacters is written verbatim",
     r.status === 0 && readFileSync(join(home, REL), "utf8") === nasty)
+}
+
+group("a card that keeps lapsing becomes a leech")
+{
+  const st = (over) => Object.assign(G.newState(), over)
+  const review = (lapses, extra) => st(Object.assign(
+    { phase: "review", interval: 30 * G.DAY, ease: 2500, reps: 40, lapses }, extra || {}))
+
+  // Anki fires at the threshold, then every half-threshold lapses after it, so
+  // a leech deliberately kept is raised at 8, 12, 16 rather than every time.
+  const fires = [];
+  for (let n = 0; n <= 20; n++) if (G.isLeechLapse(n, 8)) fires.push(n)
+  t("the default threshold fires at 8 and every 4 after",
+    JSON.stringify(fires) === JSON.stringify([8, 12, 16, 20]))
+
+  t("a card under the threshold is not a leech", !G.isLeechLapse(7, 8))
+  t("an odd threshold still advances", G.isLeechLapse(3, 3) && G.isLeechLapse(4, 3))
+  t("a threshold of 1 fires on every lapse",
+    G.isLeechLapse(1, 1) && G.isLeechLapse(2, 1) && G.isLeechLapse(3, 1))
+  t("a threshold of 0 turns leeches off entirely",
+    !G.isLeechLapse(0, 0) && !G.isLeechLapse(50, 0))
+  t("a nonsense threshold falls back to the default",
+    G.isLeechLapse(8, undefined) && G.isLeechLapse(8, "x"))
+
+  // The lapse that reaches the threshold is the one that marks it.
+  const seventh = G.grade(review(7), "again", 0)
+  t("the lapse that reaches the threshold marks the card",
+    seventh.lapses === 8 && seventh.leech === true && seventh.suspended === true)
+
+  const sixth = G.grade(review(6), "again", 0)
+  t("the lapse before it does not", sixth.lapses === 7 && !sixth.leech && !sixth.suspended)
+
+  // Suspending hides a card; it does not rewrite what the scheduler did.
+  t("a suspended card is still scheduled underneath",
+    seventh.phase === "relearning" && seventh.interval === 15 * G.DAY && seventh.ease === 2300)
+
+  t("flagging without suspending is possible",
+    (() => {
+      const r = G.grade(review(7), "again", 0, undefined, { leechSuspend: false })
+      return r.leech === true && r.suspended === false
+    })())
+
+  t("a threshold of 0 never marks a card",
+    (() => {
+      const r = G.grade(review(50), "again", 0, undefined, { leechThreshold: 0 })
+      return !r.leech && !r.suspended
+    })())
+
+  t("a custom threshold is honoured",
+    (() => {
+      const r = G.grade(review(2), "again", 0, undefined, { leechThreshold: 3 })
+      return r.lapses === 3 && r.leech === true
+    })())
+
+  // Only a lapse makes one. A passing grade on an already-marked card must not
+  // quietly clear the mark, and must not suspend it either.
+  for (const g of ["hard", "good", "easy"]) {
+    const r = G.grade(review(8, { leech: true }), g, 0)
+    t(`${g} keeps the mark and does not suspend`, r.leech === true && r.suspended === false)
+  }
+  t("a passing grade never creates a leech",
+    !G.grade(review(50), "good", 0).leech)
+
+  // The mark is sticky across a restore, so a restored card that keeps lapsing
+  // is raised again at the next half-threshold rather than immediately.
+  const restoredThenLapsed = G.grade(review(8, { leech: true, suspended: false }), "again", 0)
+  t("a restored leech is not re-suspended on the very next lapse",
+    restoredThenLapsed.lapses === 9 && restoredThenLapsed.suspended === false)
+  t("but it is raised again at the next half-threshold",
+    G.grade(review(11, { leech: true, suspended: false }), "again", 0).suspended === true)
+
+  // Undo restores the whole prior state, so it takes the mark back with it.
+  const before = review(7)
+  t("the state before the lapse carries no mark", !before.leech && !before.suspended)
+}
+
+group("a suspended card leaves the rotation")
+{
+  const cards = [
+    { id: "a", front: "a", back: "a", tags: [] },
+    { id: "b", front: "b", back: "b", tags: [] },
+    { id: "c", front: "c", back: "c", tags: [] },
+  ]
+  const due = (over) => Object.assign(G.newState(),
+    { phase: "review", due: 100, interval: 30 * G.DAY, reps: 5 }, over || {})
+
+  const progress = { reviews: {
+    a: due(),
+    b: due({ suspended: true }),
+    c: due(),
+  }}
+
+  const q = G.buildQueue(cards, progress, 1000, 20, 0)
+  t("a suspended card is not queued", q.indexOf("b") === -1)
+  t("the others still are", q.length === 2 && q.indexOf("a") !== -1 && q.indexOf("c") !== -1)
+
+  const c = G.counts(cards, progress, 1000, 20, 0)
+  t("a suspended card is counted on its own", c.suspended === 1)
+  t("and not as due", c.due === 2)
+  t("and not as waiting", c.waiting === 0)
+
+  // A deck whose remainder is all suspended should read as done, not as
+  // waiting on a card that is never coming.
+  const allOut = { reviews: { a: due({ suspended: true }), b: due({ suspended: true }), c: due({ suspended: true }) }}
+  const c2 = G.counts(cards, allOut, 1000, 20, 0)
+  t("a fully suspended deck has nothing pending", c2.pending === 0 && c2.waiting === 0)
+  t("and says how many are out", c2.suspended === 3)
+
+  // The forecast must not promise cards that will not be shown.
+  const stats = G.deckStats(cards, progress, 1000, 20, 0)
+  t("the forecast leaves out suspended cards", stats.forecast[0] === 2)
+  t("statistics count the suspended card", stats.suspended === 1)
+  t("a suspended card still counts in the composition",
+    stats.mature + stats.young + stats.learning + stats.fresh === 3)
+
+  const marked = { reviews: { a: due({ leech: true }), b: due({ leech: true, suspended: true }), c: due() }}
+  const s2 = G.deckStats(cards, marked, 1000, 20, 0)
+  t("leeches are counted whether suspended or not", s2.leeches === 2 && s2.suspended === 1)
+}
+
+group("suspended cards can be put back")
+{
+  const due = (over) => Object.assign(G.newState(),
+    { phase: "review", due: 100, interval: 30 * G.DAY, reps: 5, updated: 500 }, over || {})
+
+  const progress = { reviews: {
+    a: due({ leech: true, suspended: true }),
+    b: due(),
+    c: due({ leech: true, suspended: true }),
+  }}
+
+  const r = G.unsuspendAll(progress, 9000)
+  t("it says how many came back", r.restored === 2)
+  t("nothing is left suspended",
+    !r.progress.reviews.a.suspended && !r.progress.reviews.c.suspended)
+  t("the leech mark is kept",
+    r.progress.reviews.a.leech === true && r.progress.reviews.c.leech === true)
+
+  // Stamped so the change survives the other surface's read-merge-write, but
+  // only for the cards it actually changed.
+  t("restored cards are stamped",
+    r.progress.reviews.a.updated === 9000 && r.progress.reviews.c.updated === 9000)
+  t("untouched cards keep their stamp", r.progress.reviews.b.updated === 500)
+
+  t("the original document is not mutated",
+    progress.reviews.a.suspended === true)
+
+  t("restoring nothing is not an error",
+    (() => {
+      const none = G.unsuspendAll({ reviews: { b: due() } }, 9000)
+      return none.restored === 0 && none.progress.reviews.b.updated === 500
+    })())
+
+  t("an empty document is handled", G.unsuspendAll(null, 9000).restored === 0)
+
+  // The count must not be written to disk as part of the document.
+  t("the saved document carries only reviews",
+    Object.keys(JSON.parse(G.serializeProgress(r.progress))).join() === "reviews")
+
+  // A restored card is queued again.
+  const cards = [{ id: "a", front: "a", back: "a", tags: [] }]
+  t("a restored card returns to the queue",
+    G.buildQueue(cards, r.progress, 1000, 20, 0).indexOf("a") !== -1)
+}
+
+group("the leech fields survive a round trip")
+{
+  const s = Object.assign(G.newState(), { phase: "review", leech: true, suspended: true })
+  const back = G.parseProgress(G.serializeProgress({ reviews: { a: s } })).reviews.a
+  t("leech survives being written and read", back.leech === true)
+  t("suspended survives being written and read", back.suspended === true)
+
+  // Both come off disk, where anything could have written them.
+  const loose = G.normalizeState({ phase: "review", leech: "yes", suspended: 1 })
+  t("only a literal true suspends", loose.suspended === false)
+  t("only a literal true marks a leech", loose.leech === false)
+  t("a new card carries neither",
+    G.newState().leech === false && G.newState().suspended === false)
+
+  // Merging keeps whichever entry is newer, including its suspension.
+  const mine = { reviews: { a: Object.assign(G.newState(), { updated: 10, suspended: true }) } }
+  const theirs = { reviews: { a: Object.assign(G.newState(), { updated: 20, suspended: false }) } }
+  t("a newer restore wins over an older suspension",
+    G.mergeProgress(mine, theirs).reviews.a.suspended === false)
+  t("a newer suspension wins over an older restore",
+    G.mergeProgress(theirs, mine).reviews.a.suspended === false ||
+    G.mergeProgress({ reviews: { a: Object.assign(G.newState(), { updated: 30, suspended: true }) } }, theirs)
+      .reviews.a.suspended === true)
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

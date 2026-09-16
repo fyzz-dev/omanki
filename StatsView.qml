@@ -20,6 +20,8 @@ Column {
 
   readonly property int seen: root.stats ? root.stats.seen : 0
   readonly property int total: root.stats ? root.stats.total : 0
+  readonly property int leeches: root.stats ? (root.stats.leeches || 0) : 0
+  readonly property int suspended: root.stats ? (root.stats.suspended || 0) : 0
 
   // ------------------------------------------------------------- composition
   // One bar rather than four numbers: the shape of a deck — how much is still
@@ -239,6 +241,50 @@ Column {
           font.pixelSize: Style.font.title
         }
       }
+    }
+  }
+
+  // --------------------------------------------------------------- leeches
+  // Only when there are any. A deck with no leeches is the ordinary case and
+  // should not carry a row of zeroes explaining a thing that has not happened.
+  //
+  // This is also the only place a suspended card can be found again: there is
+  // no card browser to go looking in, so the count and the way back have to be
+  // in the same sentence, or suspending would be a one-way door.
+  Column {
+    width: parent.width
+    spacing: Style.spacing.sm
+    visible: root.leeches > 0
+
+    PanelSeparator {
+      width: parent.width
+      foreground: root.foreground
+    }
+
+    PanelSectionHeader {
+      textFormat: Text.PlainText
+      width: parent.width
+      text: "LEECHES"
+      foreground: root.foreground
+      fontFamily: root.fontFamily
+    }
+
+    Text {
+      textFormat: Text.PlainText
+      width: parent.width
+      wrapMode: Text.Wrap
+      text: {
+        var n = root.leeches
+        var head = n + (n === 1 ? " card has" : " cards have") + " lapsed enough to count as a leech"
+        if (root.suspended > 0)
+          return head + ", and " + root.suspended + " of them "
+              + (root.suspended === 1 ? "is" : "are") + " suspended — out of the rotation until restored."
+        return head + ". None are suspended, so they are all still in the rotation."
+      }
+      color: root.foreground
+      opacity: 0.55
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
     }
   }
 

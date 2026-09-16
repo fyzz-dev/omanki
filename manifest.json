@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "yamz8.omanki",
   "name": "omanki",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": "yamz8",
   "license": "MIT",
   "description": "Spaced-repetition flashcards in the bar",
@@ -25,7 +25,9 @@
       "deck": "",
       "newPerDay": 20,
       "reviewsPerDay": 0,
-      "showCount": true
+      "showCount": true,
+      "leechThreshold": 8,
+      "leechSuspend": true
     },
     "schema": [
       {
@@ -61,6 +63,23 @@
         "label": "Show waiting count",
         "defaultValue": true,
         "description": "Show the number of waiting cards next to the bar glyph."
+      },
+      {
+        "key": "leechThreshold",
+        "type": "integer",
+        "label": "Leech threshold",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "defaultValue": 8,
+        "description": "How many times a card may be forgotten before it counts as a leech. 0 turns leeches off."
+      },
+      {
+        "key": "leechSuspend",
+        "type": "boolean",
+        "label": "Suspend leeches",
+        "defaultValue": true,
+        "description": "Take a leech out of the rotation rather than only marking it. Restore them from the statistics view."
       }
     ]
   }

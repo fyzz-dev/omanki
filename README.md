@@ -112,6 +112,7 @@ same restart clears it.
 | `1` `2` `3` `4` | Again / Hard / Good / Easy |
 | `u` | Undo the last answer |
 | `s` | Statistics (overlay only) |
+| `l` | Restore suspended leeches (overlay only) |
 | `a` | Add a card (overlay only) |
 | `r` | Reload the deck from disk |
 | `esc` | Close |
@@ -147,6 +148,18 @@ derived from the cards themselves; the plugin keeps no review log, so
 *retention* is a lifetime figure per card (answers that never had to be
 relearned) rather than Anki's rolling window, and the view says so rather than
 letting the number be misread.
+
+**Leeches** appear there too, but only once there are any — a deck without them
+says nothing about them. The line gives the count, how many are suspended, and
+`l` puts every suspended card back. That is deliberately the same view: there
+is no card browser to go hunting in, so the count and the way back have to be
+in one place or suspending would be a one-way door. Restoring keeps the leech
+mark, so a card that goes on lapsing is raised again at the next threshold
+rather than immediately.
+
+When a card becomes a leech mid-session, the surface says so at the moment it
+happens rather than letting the card quietly vanish. The bar panel has no
+statistics view, so there it points at the overlay.
 
 **Adding a card** takes a front, a back, and optional comma-separated tags;
 `enter` moves between fields and saves from the last one. The form clears and
@@ -210,6 +223,8 @@ hot-reloads on save.
 | `showCount` | `true` | Show the waiting count next to the bar glyph. |
 | `tags` | *(none)* | Restrict the session to cards carrying any of these tags. |
 | `reviewsPerDay` | `0` | Cap how many due cards a day serves. `0` means no cap. |
+| `leechThreshold` | `8` | Lapses before a card counts as a leech. `0` turns leeches off. |
+| `leechSuspend` | `true` | Take a leech out of the rotation rather than only marking it. |
 
 ```json
 { "id": "yamz8.omanki", "newPerDay": 10, "deck": "~/notes/spanish.json", "tags": ["verbs"] }
@@ -264,6 +279,26 @@ card already had rather than computing a new one.
 interval, and sends the card through a 10-minute relearning step. Coming out
 of relearning restores that halved interval rather than starting over at a
 day, so one slip does not erase months of spacing.
+
+A card that keeps being forgotten becomes a **leech**. Past some number of
+lapses the card is the problem rather than your memory — the question is
+ambiguous, or it is really two facts sharing one front — and grinding it every
+few days costs more than it returns. At eight lapses omanki marks the card and
+takes it out of the rotation; it is raised again every four lapses after that,
+so a leech you decide to keep does not nag on every slip. Both numbers follow
+Anki's.
+
+A suspended card is hidden, not rewritten. Its interval, ease and due date go
+on being exactly what the scheduler last made them, so restoring one puts it
+back where it was rather than at the beginning.
+
+Anki also tags the note `leech`. This plugin does not, because the deck is your
+file: it is only ever written through the `a` composer, and writing a tag into
+it on a lapse would break that for a card you never touched. The mark lives in
+the progress file instead, and the statistics view is where you see it.
+
+Set `leechThreshold` to `0` to turn leeches off, or `leechSuspend` to `false`
+to mark them without taking them out.
 
 The study day rolls over at **4am** local time, not midnight, so a card
 answered at 1am counts toward the day you are still awake in. That is what the
@@ -381,9 +416,9 @@ node tests/scheduler.test.mjs
 ```
 
 That covers the learning steps, interval growth and spreading, lapses and
-recovery, the clamps, deck parsing, an oversized deck being reported as such,
-queue order, the 4am rollover, document merging, and the hardening on both
-file-I/O snippets.
+recovery, leeches and restoring them, the clamps, deck parsing, an oversized
+deck being reported as such, queue order, the 4am rollover, document merging,
+and the hardening on both file-I/O snippets.
 
 Those tests are pure: they know nothing about processes, files, or two
 surfaces being open at once. Every bug this plugin has actually shipped lived
