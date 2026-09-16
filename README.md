@@ -28,6 +28,8 @@ https://github.com/user-attachments/assets/5f6f7fe7-9a2c-4d74-9281-ffa86d0405d3
 
 *The bar panel, mid-session — a deck of Omarchy's own keybindings.*
 
+[Introducing omanki →](https://x.com/yamzeight/status/2099811274179625152)
+
 ## Install
 
 ```bash
