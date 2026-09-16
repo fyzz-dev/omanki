@@ -263,8 +263,35 @@ ease — a card you have not learned yet has no history to judge it by.
 A **review** card's interval is multiplied by its ease factor (2.5 to start).
 *Hard* multiplies by 1.2 and costs 150 ease, *Good* multiplies by the ease
 itself, *Easy* adds a 1.3 bonus and earns 150 ease. Ease is held between 1.3
-and 3.0. A passing grade always pushes the card further out than it was, even
-when the multiplier rounds to nothing.
+and 3.0. The ease a grade earns or costs applies to the *next* answer, not the
+one that earned it — Anki picks the interval before it moves the factor, so
+*Easy*'s bonus multiplies the factor the card arrived with.
+
+The three passing grades are worked out as one chain, each floored a day above
+the one below it. That is what guarantees a passing grade always pushes a card
+further out than it was even when the multiplier rounds to nothing, and that
+*Hard* can never schedule a longer gap than *Good*.
+
+**Answering late counts for something.** If a card was due in ten days, you did
+not see it for fifty, and you still knew it, then your memory holds it for
+something like fifty days rather than ten — and scheduling from the ten throws
+away what the answer just demonstrated. So *Good* adds half the lateness to the
+interval before multiplying, and *Easy* adds all of it:
+
+| 10-day card, answered | *Good* gives |
+|---|---|
+| on time | 25 days |
+| 20 days late | 50 days |
+| 40 days late | 75 days |
+
+*Hard* credits none of it — a struggle is not evidence of comfortable recall,
+however long the gap was. Answering **early** earns nothing and costs nothing.
+
+This matters more here than it does in Anki. A bar widget is for clicking in
+passing, so coming back to a backlog is the normal case rather than the
+exception; without the credit, every card you still know would be re-served far
+sooner than the evidence warrants and the backlog would rebuild faster than it
+should.
 
 Each new interval is then **spread** over a small band around itself — a few
 percent for a long one, proportionally more for a short one, the same bands
@@ -415,7 +442,8 @@ The scheduler is deliberately free of QML types, so it runs under plain node:
 node tests/scheduler.test.mjs
 ```
 
-That covers the learning steps, interval growth and spreading, lapses and
+That covers the learning steps, interval growth and spreading, the credit for
+answering late and the order the three passing grades keep, lapses and
 recovery, leeches and restoring them, the clamps, deck parsing, an oversized
 deck being reported as such, queue order, the 4am rollover, document merging,
 and the hardening on both file-I/O snippets.

@@ -126,18 +126,29 @@ function fuzzInterval(seconds, roll) {
   return clampInterval((low + Math.floor(r * (high - low + 1))) * DAY)
 }
 
-// Every successful answer has to move the card further out than it was, even
-// when the multiplier rounds to nothing — otherwise a card with a short
-// interval and a low ease can sit at the same spacing forever.
+// How many whole days later than scheduled this answer is. Anki counts in days
+// and never below zero: answering early earns no credit, and must not be turned
+// into a penalty either.
 //
-// Fuzz is applied inside that guarantee, not after it: the band around a short
-// interval can reach back far enough to land on the interval the card already
-// had (3 days grown at minimum ease is 4, whose band opens at 3), and a
-// "correct" answer that changes nothing is the thing this floor exists to
-// prevent. Spreading happens within the half of the band that still moves.
-function grow(interval, factor, roll) {
-  var floor = interval + DAY
-  return clampInterval(Math.max(floor, fuzzInterval(Math.max(floor, interval * factor), roll)))
+// Only a review card can be late in the sense that matters. A learning card is
+// measured in minutes and its steps are fixed, so lateness there is not
+// evidence of anything.
+function daysLate(state, now) {
+  if (state.phase !== "review") return 0
+  return Math.max(0, Math.floor((now - state.due) / DAY))
+}
+
+// Anki's _constrainedIvl. Every successful answer has to move the card further
+// out than the grade below it, even when the multiplier rounds to nothing —
+// otherwise a card with a short interval and a low ease can sit at the same
+// spacing forever, and a harsher grade can end up scheduling a longer gap than
+// a kinder one.
+//
+// Spreading happens before the floor, not after, which is also Anki's order. A
+// band reaching below the floor is meant to be cut off by it; spreading
+// afterwards would push a grade back under the one it has to beat.
+function constrainIvl(seconds, floorSeconds, roll) {
+  return clampInterval(Math.max(fuzzInterval(seconds, roll), floorSeconds + DAY))
 }
 
 function newState() {
@@ -328,14 +339,42 @@ function grade(state, g, now, roll, opts) {
     return next
   }
 
+  // The three passing grades are one chain, each floored a day above the one
+  // below it, because that is how Anki computes them and the floors are what
+  // keep them in order once spreading is applied.
+  //
+  // Lateness is the other half of it. If a card was due in ten days, you did
+  // not see it for fifty, and you still knew it, then your memory holds it for
+  // something like fifty days and not ten — scheduling from the ten throws away
+  // the evidence the answer just produced. Good credits half the lateness and
+  // Easy all of it. Hard credits none: a struggle is not evidence of
+  // comfortable recall, however long the gap was.
+  var lateDays = daysLate(s, now)
+  var halfLate = Math.floor(lateDays / 2) * DAY   // Anki floors this division
+  var fullLate = lateDays * DAY
+
+  // Anki picks the interval before it updates the ease, so all three use the
+  // factor the card arrived with — including Easy, whose bonus multiplies the
+  // old factor rather than the one the same answer is about to earn.
+  var factor = s.ease / 1000
+
+  // The chain shares one roll where Anki draws a fresh one per rung. Only the
+  // rung being returned is ever kept; the others exist to be floors, and a
+  // floor only binds on very short intervals, where one roll for the chain is
+  // if anything the steadier choice. Drawing three would mean handing grade()
+  // three rolls to stay as pure as it is.
+  var hardIvl = constrainIvl(s.interval * HARD_MULTIPLIER, s.interval, roll)
   if (g === "hard") {
     next.ease = clampEase(s.ease - 150)
-    next.interval = grow(s.interval, HARD_MULTIPLIER, roll)
-  } else if (g === "good") {
-    next.interval = grow(s.interval, s.ease / 1000, roll)
+    next.interval = hardIvl
   } else {
-    next.ease = clampEase(s.ease + 150)
-    next.interval = grow(s.interval, (next.ease / 1000) * EASY_BONUS, roll)
+    var goodIvl = constrainIvl((s.interval + halfLate) * factor, hardIvl, roll)
+    if (g === "good") {
+      next.interval = goodIvl
+    } else {
+      next.ease = clampEase(s.ease + 150)
+      next.interval = constrainIvl((s.interval + fullLate) * factor * EASY_BONUS, goodIvl, roll)
+    }
   }
 
   next.due = now + next.interval

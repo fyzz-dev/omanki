@@ -28,6 +28,7 @@ const EXPORTS = [
   "resolveDeck", "sanePerDay", "normalizeTags", "filterByTags", "sectionLabel", "promote", "UNDO_DEPTH",
   "READ_SH", "WRITE_SH", "relativeToHome", "READ_LIMIT", "fuzzInterval", "hitReadLimit",
   "LEECH_THRESHOLD", "isLeechLapse", "leechConfig", "unsuspendAll",
+  "daysLate", "constrainIvl", "HARD_MULTIPLIER", "EASY_BONUS",
 ]
 const G = {}
 new Function("exports", `${src}\nfor (const k of ${JSON.stringify(EXPORTS)}) exports[k] = eval(k)`)(G)
@@ -1033,6 +1034,145 @@ group("the leech fields survive a round trip")
     G.mergeProgress(theirs, mine).reviews.a.suspended === false ||
     G.mergeProgress({ reviews: { a: Object.assign(G.newState(), { updated: 30, suspended: true }) } }, theirs)
       .reviews.a.suspended === true)
+}
+
+group("answering late credits the wait")
+{
+  // If a card was due in ten days, you did not see it for fifty, and you still
+  // knew it, your memory holds it for something like fifty days and not ten.
+  // Anki puts half the lateness into Good's base and all of it into Easy's.
+  const late = (days, ivl = 10, ease = 2500) => Object.assign(G.newState(),
+    { phase: "review", interval: ivl * G.DAY, ease, reps: 5, due: NOW - days * G.DAY })
+  const d = (state, g) => G.grade(state, g, NOW).interval / G.DAY
+
+  t("on time is unchanged", d(late(0), "good") === 25)
+  t("twenty days late credits ten", d(late(20), "good") === 50)
+  t("forty days late credits twenty", d(late(40), "good") === 75)
+  t("a hundred days late credits fifty", d(late(100), "good") === 150)
+
+  // Anki floors the halving, so an odd number of days late credits the lower
+  // whole day rather than half of one.
+  t("an odd lateness floors the half", d(late(5), "good") === 30)
+  t("five and four days late credit the same", d(late(5), "good") === d(late(4), "good"))
+
+  t("easy takes all of the lateness", d(late(20), "easy") === 97.5)
+  t("easy on time is unchanged", d(late(0), "easy") === 32.5)
+
+  // Hard is the deliberate exception: a struggle is not evidence of
+  // comfortable recall, however long the gap was.
+  t("hard credits nothing",
+    d(late(0), "hard") === 12 && d(late(40), "hard") === 12 && d(late(200), "hard") === 12)
+
+  // Early is not a penalty. Anki floors the lateness at zero rather than
+  // letting a card answered ahead of schedule shrink.
+  const early = Object.assign(G.newState(),
+    { phase: "review", interval: 10 * G.DAY, ease: 2500, reps: 5, due: NOW + 30 * G.DAY })
+  t("answering early earns nothing, and costs nothing", d(early, "good") === 25)
+  t("daysLate never goes negative", G.daysLate(early, NOW) === 0)
+  t("daysLate counts whole days", G.daysLate(late(7), NOW) === 7)
+
+  // A part-day does not round up into a day of credit.
+  const halfDay = Object.assign(G.newState(),
+    { phase: "review", interval: 10 * G.DAY, ease: 2500, reps: 5, due: NOW - G.DAY * 1.5 })
+  t("a part day is not counted", G.daysLate(halfDay, NOW) === 1)
+
+  // Only a review card can be late in the sense that matters: a learning
+  // card's steps are fixed minutes and lateness there is evidence of nothing.
+  const learning = Object.assign(G.newState(),
+    { phase: "learning", step: 0, due: NOW - 400 * G.DAY })
+  t("a learning card is never late", G.daysLate(learning, NOW) === 0)
+  t("a very overdue learning card still takes its step",
+    G.grade(learning, "good", NOW).due === NOW + 10 * G.MINUTE)
+
+  // A relearning card leaves on the interval it kept, lateness or not.
+  const relearning = Object.assign(G.newState(),
+    { phase: "relearning", interval: 50 * G.DAY, reps: 6, due: NOW - 400 * G.DAY })
+  t("leaving relearning ignores lateness",
+    G.grade(relearning, "good", NOW).interval === 50 * G.DAY)
+
+  // The credit is unbounded in Anki apart from the maximum interval, and a
+  // progress file is not trusted input - a nonsense due date must land on the
+  // clamp rather than somewhere absurd.
+  const ancient = Object.assign(G.newState(),
+    { phase: "review", interval: G.DAY, ease: 2500, reps: 5, due: 0 })
+  const huge = G.grade(ancient, "good", NOW).interval
+  t("an impossible lateness still lands inside the maximum interval",
+    isFinite(huge) && huge > 0 && huge <= G.MAX_INTERVAL)
+
+  // And one where the credit really does run past the cap.
+  const ancientLong = Object.assign(G.newState(),
+    { phase: "review", interval: 5000 * G.DAY, ease: 2500, reps: 5, due: 0 })
+  t("a credit past the cap is clamped to it",
+    G.grade(ancientLong, "good", NOW).interval === G.MAX_INTERVAL)
+}
+
+group("the three passing grades stay in order")
+{
+  // Anki computes them as a chain, each floored a day above the one below, so
+  // a harsher grade can never schedule a longer gap than a kinder one.
+  const cases = [
+    { ivl: 1, ease: G.MIN_EASE, late: 0 },
+    { ivl: 1, ease: G.MIN_EASE, late: 400 },
+    { ivl: 3, ease: G.MIN_EASE, late: 0 },
+    { ivl: 10, ease: 2500, late: 0 },
+    { ivl: 10, ease: 2500, late: 40 },
+    { ivl: 200, ease: 3000, late: 900 },
+  ]
+
+  let ordered = true, moved = true
+  for (const c of cases) {
+    const st = Object.assign(G.newState(), { phase: "review", interval: c.ivl * G.DAY,
+      ease: c.ease, reps: 9, due: NOW - c.late * G.DAY })
+    for (let i = 0; i <= 20; i++) {
+      const roll = i / 20
+      const h = G.grade(st, "hard", NOW, roll).interval
+      const g = G.grade(st, "good", NOW, roll).interval
+      const e = G.grade(st, "easy", NOW, roll).interval
+      if (!(h < g && g < e)) ordered = false
+      if (!(h > st.interval)) moved = false
+    }
+  }
+  t("hard is always shorter than good, and good than easy", ordered)
+  t("even hard always moves the card further out", moved)
+
+  // The floor is a day above the rung below, which is what makes the ordering
+  // survive a short interval where every multiplier rounds to nothing.
+  const stuck = Object.assign(G.newState(),
+    { phase: "review", interval: G.DAY, ease: G.MIN_EASE, reps: 9, lapses: 4, due: NOW })
+  t("a stuck card is pushed out one rung at a time",
+    G.grade(stuck, "hard", NOW).interval === 2 * G.DAY &&
+    G.grade(stuck, "good", NOW).interval === 3 * G.DAY &&
+    G.grade(stuck, "easy", NOW).interval === 4 * G.DAY)
+
+  // constrainIvl on its own: spread first, then floored, then clamped.
+  t("the floor is a day above what is passed in",
+    G.constrainIvl(G.DAY, 10 * G.DAY) === 11 * G.DAY)
+  t("a value above the floor is left alone",
+    G.constrainIvl(50 * G.DAY, 10 * G.DAY) === 50 * G.DAY)
+  t("the maximum interval still wins",
+    G.constrainIvl(G.MAX_INTERVAL * 2, G.DAY) === G.MAX_INTERVAL)
+}
+
+group("ease is applied after the interval is chosen")
+{
+  // Anki picks the interval before it updates the factor, so all three grades
+  // use the factor the card arrived with. Easy's bonus multiplies the old
+  // factor rather than the one the same answer is about to earn.
+  const st = Object.assign(G.newState(),
+    { phase: "review", interval: 10 * G.DAY, ease: 2500, reps: 5, due: NOW })
+  const r = G.grade(st, "easy", NOW)
+
+  t("easy still earns its ease", r.ease === 2650)
+  t("but the interval used the old factor",
+    r.interval === 10 * G.DAY * 2.5 * 1.3)
+  t("which is not what the new factor would give",
+    r.interval !== 10 * G.DAY * 2.65 * 1.3)
+
+  // Same on the way down: hard's interval does not pay its own ease cost.
+  const h = G.grade(st, "hard", NOW)
+  t("hard costs ease", h.ease === 2350)
+  t("hard's interval is the flat multiplier, not the reduced factor",
+    h.interval === 12 * G.DAY)
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)
