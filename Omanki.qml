@@ -351,10 +351,10 @@ Item {
             // beside them: a card has just been taken out of the rotation, and
             // for those few seconds that is the more useful thing to read.
             text: reviewer.leechNotice
-                ? reviewer.leechNotice + "  ·  s stats to restore"
-                : (reviewer.revealed ? "1-4 grade  ·  space good" : "space reveal")
-                  + (reviewer.canUndo ? "  ·  u undo" : "")
-                  + "  ·  s stats  ·  a add  ·  esc close"
+                ? reviewer.leechNotice + "  ·  s stats to restore"
+                : (reviewer.revealed ? "1-4 grade  ·  space good" : "space reveal")
+                  + (reviewer.canUndo ? "  ·  u undo" : "")
+                  + "  ·  s stats  ·  a add  ·  esc close"
             color: root.foreground
             opacity: 0.4
             font.family: root.fontFamily
@@ -368,9 +368,9 @@ Item {
             wrapMode: Text.Wrap
             visible: root.mode === "stats"
             text: (root.restoreNotice ? root.restoreNotice + "  ·  " : "")
-                + "s back to review"
-                + (reviewer.deckStats && reviewer.deckStats.suspended > 0 ? "  ·  l restore leeches" : "")
-                + "  ·  a add a card  ·  esc close"
+                + "s back to review"
+                + (reviewer.deckStats && reviewer.deckStats.suspended > 0 ? "  ·  l restore leeches" : "")
+                + "  ·  a add a card  ·  esc close"
             color: root.foreground
             opacity: 0.4
             font.family: root.fontFamily

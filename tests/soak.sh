@@ -565,6 +565,23 @@ else
   overlay_toggle
 fi
 
+group "the panel's statistics open, and leave the cards where they were"
+# The panel grew its own statistics, laid out in tabs rather than as the single
+# column the overlay can afford. A view that throws on every binding still
+# "opens", so this walks the strip and then checks the cards are still there to
+# be answered - and the log scan at the end of this file catches the throwing.
+reset
+panel_open
+key "s"
+wtype -k Right; sleep 0.5
+wtype -k Right; sleep 0.5
+wtype -k Right; sleep 0.5    # wraps back round to the first
+ok "the statistics tabs were walked"
+key "s"
+reveal_and_grade 3
+expect_soon "the panel still reviews after touring its tabs" 1 answered
+panel_close
+
 group "nothing is left running or stranded"
 # Scoped to children of the shell, not a bare `pgrep -f`. A bare match also
 # catches any ancestor whose own command line happens to contain the pattern
