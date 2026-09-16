@@ -26,7 +26,52 @@ set -uo pipefail
 PLUGIN=yamz8.omanki
 STATE="$HOME/.local/state/omarchy/omanki.json"
 STATE_DIR="$(dirname "$STATE")"
-DECK="$HOME/.local/share/omanki/cards.json"
+
+# The settings group edits the real shell.json, for the same reason the add
+# tests edit the real deck: a setting only reaches a surface by way of the
+# shell that reads it. Restored on the way out on every path.
+CONFIG="$HOME/.config/omarchy/shell.json"
+
+# Which deck the plugin will actually use, worked out the way the plugin works
+# it out: from this plugin's `deck` setting in shell.json, with `~` expanded,
+# falling back to the default when the setting is absent or empty.
+#
+# This was hardcoded to the default path, which is wrong the moment the setting
+# points anywhere else — and it failed in the worst available way. Every add
+# landed in the configured deck while every assertion counted cards in the
+# default one, so a working add path looked like it silently did nothing; five
+# assertions failed for a reason none of them could express. Worse, the file
+# backed up and restored was not the file being written, so a configured deck
+# quietly accumulated the soak's own cards while an untouched one was carefully
+# preserved. The test has to read the setting or it is testing a file nobody
+# uses.
+resolve_deck() {
+  python3 - "$CONFIG" "$PLUGIN" "$HOME" <<'DECKPY'
+import json, sys
+config, plugin, home = sys.argv[1], sys.argv[2], sys.argv[3]
+default = home + "/.local/share/omanki/cards.json"
+
+configured = ""
+try:
+    doc = json.load(open(config))
+except Exception:
+    doc = {}
+for section in doc.get("bar", {}).get("layout", {}).values():
+    for entry in section:
+        if isinstance(entry, dict) and entry.get("id") == plugin:
+            configured = str(entry.get("deck") or "").strip()
+
+# Anki.js resolveDeck, in Python. Kept deliberately literal so the two can be
+# read side by side.
+if not configured:                print(default)
+elif configured == "~":           print(home)
+elif configured.startswith("~/"): print(home + configured[1:])
+else:                             print(configured)
+DECKPY
+}
+
+DECK="$(resolve_deck)"
+[ -n "$DECK" ] || { echo "could not work out which deck the plugin will use"; exit 2; }
 
 # The add-a-card tests write to the real deck, so it is put back on the way
 # out — including on an interrupt, since leaving someone's deck edited because
@@ -34,17 +79,30 @@ DECK="$HOME/.local/share/omanki/cards.json"
 DECK_BACKUP="$(mktemp)"
 [ -f "$DECK" ] && cp "$DECK" "$DECK_BACKUP"
 
-# The settings group edits the real shell.json, for the same reason the add
-# tests edit the real deck: a setting only reaches a surface by way of the
-# shell that reads it. Restored on the way out on every path.
-CONFIG="$HOME/.config/omarchy/shell.json"
 CONFIG_BACKUP="$(mktemp)"
 [ -f "$CONFIG" ] && cp "$CONFIG" "$CONFIG_BACKUP"
+
+# The scheduling progress is the one file this script deletes outright — reset()
+# needs a clean slate before a group, and several groups start with one. It was
+# also the one file never put back, so running the soak silently destroyed real
+# review history: every interval, ease and lapse count earned on the deck this
+# is pointed at. Backed up and restored like the other two, so a clean slate
+# lasts for the run rather than forever.
+#
+# Whether it existed at all is tracked separately, because an absent progress
+# file and an empty one are different states and restoring the wrong one would
+# leave the soak's own answers behind.
+STATE_BACKUP="$(mktemp)"
+STATE_EXISTED=no
+[ -f "$STATE" ] && { cp "$STATE" "$STATE_BACKUP"; STATE_EXISTED=yes; }
 
 restore_files() {
   [ -s "$DECK_BACKUP" ] && cp "$DECK_BACKUP" "$DECK"
   [ -s "$CONFIG_BACKUP" ] && cp "$CONFIG_BACKUP" "$CONFIG"
-  rm -f "$DECK_BACKUP" "$CONFIG_BACKUP"
+  # No backup to copy means there was nothing there to begin with, so the
+  # honest restore is to take the soak's own progress away again.
+  if [ "$STATE_EXISTED" = yes ]; then cp "$STATE_BACKUP" "$STATE"; else rm -f "$STATE"; fi
+  rm -f "$DECK_BACKUP" "$CONFIG_BACKUP" "$STATE_BACKUP"
 }
 trap restore_files EXIT INT TERM
 
@@ -105,6 +163,12 @@ expect_deck_soon() { # label expected
     sleep 0.2
   done
   bad "$label — expected $want, got $got"
+  # A count that did not move says nothing about why it did not move, and the
+  # answer has twice turned out to be that the count was of the wrong file.
+  # Name the deck and show what is in it, so a wrong path, a refused add and a
+  # deck that stopped parsing are told apart from the output alone.
+  echo "         deck: $DECK"
+  echo "         have: $(deck_fronts)"
 }
 
 reveal_and_grade() { wtype " "; sleep 0.7; wtype "$1"; sleep 1.3; }
@@ -147,6 +211,24 @@ json.dump(doc, open(path, "w"), indent=2)
 PYEOF
 }
 
+# The last few fronts in the deck, for a failure that needs to say what landed
+# rather than only how many things did.
+deck_fronts() {
+  python3 - "$DECK" <<'PY'
+import json, os, sys
+p = sys.argv[1]
+if not os.path.exists(p): print("(no such file)"); raise SystemExit
+try:
+    d = json.load(open(p))
+except Exception as e:
+    print("(does not parse: %s)" % e); raise SystemExit
+cards = d if isinstance(d, list) else d.get("cards", [])
+fronts = [str(c.get("front", "")) for c in cards if isinstance(c, dict)]
+tail = fronts[-4:]
+print((", ".join(repr(f) for f in tail) or "(empty)") + (" (+%d earlier)" % (len(fronts) - len(tail)) if len(fronts) > len(tail) else ""))
+PY
+}
+
 deck_count() {
   python3 - "$DECK" <<'PY'
 import json, os, sys
@@ -171,6 +253,14 @@ type_card() {
 
 command -v wtype >/dev/null || { echo "wtype is required"; exit 2; }
 omarchy-shell "$PLUGIN" close >/dev/null 2>&1
+
+# Which files this run will touch. All three are written to and all three are
+# restored, and the deck in particular is whichever one the settings point at,
+# so a run that goes wrong should not leave you guessing which file it meant.
+echo "deck:   $DECK"
+echo "state:  $STATE"
+echo "config: $CONFIG"
+echo "(all three are restored on exit, including on an interrupt)"
 
 group "a configured setting reaches both surfaces"
 # Both surfaces are handed their settings by the shell, but not by the same

@@ -409,8 +409,10 @@ one the shell hands its entry to. It also scans the shell's log, since a view
 can render and still throw on every binding without any file-based assertion
 noticing.
 
-The deck and `shell.json` are backed up and restored on exit, including on an
-interrupt.
+The deck, `shell.json` and your scheduling progress are backed up and restored
+on exit, including on an interrupt. The deck it uses is the one your settings
+point at, not the default path — it reads `deck` from `shell.json` the way the
+plugin does, and prints all three paths when it starts.
 Assertions poll rather than sleep: every action starts a read, a merge and a
 write, so a fixed sleep tests the machine's mood rather than the plugin.
 
