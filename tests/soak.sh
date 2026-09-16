@@ -547,9 +547,12 @@ else
 
   # Out of the rotation means out: the card must not come back as the next one
   # to answer, and must not be counted as waiting either.
+  #
+  # Polled rather than read once. Nothing should be writing between the reload
+  # and the read, but "should be" is what a fixed sleep always assumes, and this
+  # was the only positive assertion here still making that assumption.
   key "r"
-  t_after="$(state_field "$leech_id" "suspended")"
-  expect "it stays suspended across a reload" "true" "$t_after"
+  expect_field_soon "it stays suspended across a reload" "$leech_id" "suspended" "true"
 
   # Restoring lives in the statistics, which is also the only place the count
   # is shown.
