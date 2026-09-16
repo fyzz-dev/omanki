@@ -21,6 +21,7 @@ Panel {
   readonly property int reviewsPerDay: Anki.sanePerDay(root.setting("reviewsPerDay", 0), 0)
   readonly property int leechThreshold: Anki.sanePerDay(root.setting("leechThreshold", Anki.LEECH_THRESHOLD), Anki.LEECH_THRESHOLD)
   readonly property bool leechSuspend: root.setting("leechSuspend", true) !== false
+  readonly property int lapsePercent: Anki.sanePerDay(root.setting("lapsePercent", Anki.LAPSE_PERCENT), Anki.LAPSE_PERCENT)
   // The count is the point of the widget, but a bar that has to stay narrow
   // can turn it off and keep the glyph.
   readonly property bool showCount: root.setting("showCount", true) !== false
@@ -165,6 +166,7 @@ Panel {
           reviewsPerDay: root.reviewsPerDay
           leechThreshold: root.leechThreshold
           leechSuspend: root.leechSuspend
+          lapsePercent: root.lapsePercent
           tags: root.tags
           active: root.opened
           foreground: root.foreground

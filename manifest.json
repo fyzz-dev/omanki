@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "yamz8.omanki",
   "name": "omanki",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "author": "yamz8",
   "license": "MIT",
   "description": "Spaced-repetition flashcards in the bar",
@@ -27,7 +27,8 @@
       "reviewsPerDay": 0,
       "showCount": true,
       "leechThreshold": 8,
-      "leechSuspend": true
+      "leechSuspend": true,
+      "lapsePercent": 50
     },
     "schema": [
       {
@@ -63,6 +64,16 @@
         "label": "Show waiting count",
         "defaultValue": true,
         "description": "Show the number of waiting cards next to the bar glyph."
+      },
+      {
+        "key": "lapsePercent",
+        "type": "integer",
+        "label": "Interval kept on a lapse",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "defaultValue": 50,
+        "description": "How much of a forgotten card's interval survives, as a percentage. 0 sends it back to a single day, which is Anki's default."
       },
       {
         "key": "leechThreshold",

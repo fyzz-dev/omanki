@@ -374,7 +374,13 @@ group "a configured setting reaches both surfaces"
 # setting to see from outside: with two a day, a surface introduces two cards
 # and then has nothing left to show, however many the deck holds.
 set_setting newPerDay 2
-restart_shell || bad "shell did not come back after setting newPerDay"
+
+# A second setting in the same restart, because the two are checked the same
+# way and a restart is the slow part. lapsePercent 0 is Anki's default rather
+# than this plugin's, so a surface that quietly fell back to the built-in 50
+# would keep half the interval and be caught.
+set_setting lapsePercent 0
+restart_shell || bad "shell did not come back after setting the two"
 
 reset; panel_open
 reveal_and_grade 3
@@ -383,12 +389,32 @@ reveal_and_grade 3
 expect_soon "the panel stops at the configured allowance"  2 answered
 panel_close
 
+# A 30-day card lapsed at 0% must come back to a single day. At the built-in
+# 50% it would keep fifteen, which is the difference a surface running on
+# defaults would show.
+lapse_id="$(first_card_id)"
+if [ -z "$lapse_id" ]; then
+  bad "could not work out the first card's id for the lapse check"
+else
+  reset; seed_lapses "$lapse_id" 0; panel_open
+  reveal_and_grade "1"
+  expect_field_soon "the panel honours the configured lapse" "$lapse_id" "interval" "86400"
+  panel_close
+fi
+
 reset; overlay_toggle
 reveal_and_grade 3
 reveal_and_grade 3
 reveal_and_grade 3
 expect_soon "the overlay stops at the same allowance"      2 answered
 overlay_toggle
+
+if [ -n "$lapse_id" ]; then
+  reset; seed_lapses "$lapse_id" 0; overlay_toggle
+  reveal_and_grade "1"
+  expect_field_soon "the overlay honours the same lapse setting" "$lapse_id" "interval" "86400"
+  overlay_toggle
+fi
 
 cp "$CONFIG_BACKUP" "$CONFIG"
 restart_shell || bad "shell did not come back after restoring the config"

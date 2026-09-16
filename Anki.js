@@ -27,7 +27,22 @@ var MAX_EASE = 3000
 
 var HARD_MULTIPLIER = 1.2
 var EASY_BONUS = 1.3
-var LAPSE_MULTIPLIER = 0.5
+// How much of a lapsed card's interval survives the lapse, as a percentage.
+//
+// Anki calls this "New interval" and defaults it to 0%, which sends a forgotten
+// card back to the minimum interval - a day - however long it had been holding.
+// That is a real position: the card was forgotten, so the spacing that produced
+// the forgetting has been disproved.
+//
+// This defaults to 50% instead, which is a common choice among Anki users for
+// the opposite reason: one slip on a card held for months is weak evidence
+// against months of successful recall, and starting over throws away the rest.
+//
+// Neither is obviously right, which is exactly why Anki makes it a setting
+// rather than a constant, and why this does too. A percentage rather than a
+// fraction because that is the way Anki words it and because it keeps the
+// setting an integer.
+var LAPSE_PERCENT = 50
 
 var MIN_REVIEW_INTERVAL = 1 * DAY
 var MAX_INTERVAL = 36500 * DAY
@@ -73,6 +88,19 @@ function isLeechLapse(lapses, threshold) {
   var lf = Math.max(0, Math.round(num(threshold, LEECH_THRESHOLD)))
   if (!lf || lapses < lf) return false
   return (lapses - lf) % Math.max(1, Math.floor(lf / 2)) === 0
+}
+
+// The share of the interval a lapse keeps, as a fraction. Clamped to 0-100%: a
+// negative share is meaningless and one above 100 would make forgetting a card
+// lengthen it.
+//
+// At 0% the multiplication gives nothing and clampInterval floors the result at
+// one day, which is exactly Anki's pairing of a 0% new interval with a one-day
+// minimum. The minimum is not separately configurable here; Anki exposes it,
+// but a day is the only value that has ever made sense for it.
+function lapseFactor(opts) {
+  var o = opts || {}
+  return Math.max(0, Math.min(100, Math.round(num(o.lapsePercent, LAPSE_PERCENT)))) / 100
 }
 
 // Leech settings, defaulted. Kept in one place because grade() and the surfaces
@@ -218,9 +246,12 @@ function normalizeState(state) {
 // (see fuzzInterval). Omitting it means no spreading, which is what pricing a
 // button wants; the one call site that actually commits an answer passes one.
 //
-// `opts` carries the leech settings (see leechConfig). Leeches only ever arise
-// from a lapse and never change an interval, so pricing a button can leave it
-// out along with the roll.
+// `opts` carries the settings a grade depends on: `lapsePercent` (see
+// LAPSE_PERCENT) and the leech pair (see leechConfig). Both take effect only on
+// Again, and neither is visible in a priced label: Again's label is the
+// relearning step, ten minutes, whatever the lapse keeps or the leech rule
+// decides. So previewIntervals leaves opts out along with the roll, and the
+// four numbers under the buttons stay true for any settings.
 function grade(state, g, now, roll, opts) {
   var s = normalizeState(state)
   if (!isGrade(g)) return s
@@ -318,11 +349,12 @@ function grade(state, g, now, roll, opts) {
 
   // ------------------------------------------------------------ review cards
   if (g === "again") {
-    // A lapse costs ease and half the interval, and sends the card back
-    // through a short relearning step before it counts as known again.
+    // A lapse costs ease and some of the interval, and sends the card back
+    // through a short relearning step before it counts as known again. How much
+    // of the interval it costs is `lapsePercent`; see LAPSE_PERCENT.
     next.lapses = s.lapses + 1
     next.ease = clampEase(s.ease - 200)
-    next.interval = clampInterval(s.interval * LAPSE_MULTIPLIER)
+    next.interval = clampInterval(s.interval * lapseFactor(opts))
     next.phase = "relearning"
     next.step = 0
     next.due = now + RELEARNING_STEPS[0]
