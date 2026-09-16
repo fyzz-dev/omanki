@@ -141,6 +141,10 @@ Panel {
       // panel answers it that way. The statistics tabs are walked with the
       // arrows instead, which is what a row of tabs suggests anyway.
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      // Arrows walk the tabs, and so do h and l: PanelKeyCatcher turns those
+      // into movement before any panel sees them, which is the shell's vim
+      // convention and the reason `l` cannot also mean "restore" here. The
+      // overlay has no such catcher, so there it still can.
       onMoveRequested: function(dx, dy) {
         if (root.mode === "stats" && dx !== 0) root.stepTab(dx > 0 ? 1 : -1)
       }
@@ -149,7 +153,6 @@ Panel {
         var k = t.toLowerCase()
         // Same key as the overlay, so the two surfaces stay one set of keys.
         if (k === "s") root.toggleStats()
-        else if (k === "l") root.restoreLeeches()
         else if (k === "r") reviewer.reload()
         else if (root.mode !== "review") return
         else if (k === "1") reviewer.answer("again")
@@ -317,7 +320,6 @@ Panel {
             if (root.mode === "stats")
               return (root.restoreNotice ? root.restoreNotice + "  ·  " : "")
                   + "← → tabs  ·  s back to cards"
-                  + (reviewer.deckStats && reviewer.deckStats.suspended > 0 ? "  ·  l restore" : "")
                   + "  ·  esc close"
             // A card taken out mid-session says so here; the statistics are
             // now where it can be put back, rather than the overlay.

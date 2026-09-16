@@ -112,8 +112,8 @@ same restart clears it.
 | `1` `2` `3` `4` | Again / Hard / Good / Easy |
 | `u` | Undo the last answer |
 | `s` | Statistics |
-| `←` `→` | Move between statistics tabs (bar panel) |
-| `l` | Restore suspended leeches |
+| `←` `→` or `h` `l` | Move between statistics tabs (bar panel) |
+| `l` | Restore suspended leeches (overlay) |
 | `a` | Add a card (overlay only) |
 | `r` | Reload the deck from disk |
 | `esc` | Close |
@@ -125,6 +125,11 @@ typed into a popup that closes when it loses focus is not a trade worth making.
 `Tab` is left alone. It moves between bar panels, which is the shell's own
 convention and every other panel answers it that way — so the statistics tabs
 are walked with the arrow keys instead, which is what a row of tabs suggests.
+
+In the bar panel `h` and `l` walk them too, because the shell turns those into
+movement before any panel sees them. That is also why `l` cannot mean "restore"
+there the way it does in the overlay: the key never arrives. The panel's leech
+tab carries a button instead, which is the more discoverable of the two anyway.
 
 ## Undo
 
@@ -173,7 +178,7 @@ letting the number be misread.
 **Leeches** appear in both, but only once there are any — a deck without them
 says nothing about them, and in the panel the tab itself stays away. You get
 the count, how many are suspended, and a way to put every suspended card back:
-`l` on either surface, or the button in the panel's tab. That is deliberately
+`l` in the overlay, or the button on the panel's leech tab. That is deliberately
 the same view as the count: there is no card browser to go hunting in, so the
 count and the way back have to be in one place or suspending would be a
 one-way door. Restoring keeps the leech mark, so a card that goes on lapsing is

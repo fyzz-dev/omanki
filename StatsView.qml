@@ -275,11 +275,13 @@ Column {
       wrapMode: Text.Wrap
       text: {
         var n = root.leeches
-        var head = n + (n === 1 ? " card has" : " cards have") + " lapsed enough to count as a leech"
-        if (root.suspended > 0)
-          return head + ", and " + root.suspended + " of them "
-              + (root.suspended === 1 ? "is" : "are") + " suspended — out of the rotation until restored."
-        return head + ". None are suspended, so they are all still in the rotation."
+        var s = root.suspended
+        var head = n === 1
+            ? "1 card has lapsed enough to count as a leech"
+            : n + " cards have lapsed enough to count as a leech"
+        if (s === 0) return head + ". None are suspended."
+        if (s === n) return head + (n === 1 ? ", and it is suspended." : ", and all of them are suspended.")
+        return head + ", and " + s + " of them " + (s === 1 ? "is" : "are") + " suspended."
       }
       color: root.foreground
       opacity: 0.55
