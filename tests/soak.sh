@@ -23,6 +23,10 @@
 
 set -uo pipefail
 
+# This script's own directory, so the helpers can reach Anki.js regardless of
+# where it was invoked from.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 PLUGIN=yamz8.omanki
 STATE="$HOME/.local/state/omarchy/omanki.json"
 STATE_DIR="$(dirname "$STATE")"
@@ -229,6 +233,75 @@ print((", ".join(repr(f) for f in tail) or "(empty)") + (" (+%d earlier)" % (len
 PY
 }
 
+# The id the plugin will give the first card in the deck, computed by the
+# plugin's own hashId rather than reimplemented here. A card is identified by a
+# hash of its front, and a second implementation of that hash is a second thing
+# to get wrong - seeded state that attaches to nothing looks exactly like a
+# scheduler that ignored it.
+first_card_id() {
+  node -e '
+    const fs = require("fs")
+    const src = fs.readFileSync(process.argv[1], "utf8")
+    const G = {}
+    new Function("e", src + "\nfor (const k of [\"parseDeck\"]) e[k] = eval(k)")(G)
+    const cards = G.parseDeck(fs.readFileSync(process.argv[2], "utf8")).cards
+    process.stdout.write(cards.length ? cards[0].id : "")
+  ' "$PWD/Anki.js" "$DECK"
+}
+
+# Put one card into review with a chosen number of lapses, so the next "again"
+# is the one that reaches the threshold. Lapsing a card eight times through the
+# surface is not possible in a sitting: each lapse schedules it ten minutes out.
+seed_lapses() { # id lapses
+  python3 - "$STATE" "$1" "$2" <<'SEEDPY'
+import json, os, sys, time
+path, card, lapses = sys.argv[1], sys.argv[2], int(sys.argv[3])
+now = int(time.time())
+doc = {"reviews": {}}
+if os.path.exists(path):
+    try:
+        doc = json.load(open(path))
+    except Exception:
+        pass
+doc.setdefault("reviews", {})[card] = {
+    "phase": "review", "due": now - 60, "interval": 30 * 86400, "ease": 2300,
+    "reps": 40, "lapses": lapses, "step": 0, "updated": now,
+    "firstDay": "2026-01-01", "leech": False, "suspended": False,
+}
+os.makedirs(os.path.dirname(path), exist_ok=True)
+open(path, "w").write(json.dumps(doc))
+SEEDPY
+}
+
+# One field of one card, or "-" when the card has no entry.
+state_field() { # id field
+  python3 - "$STATE" "$1" "$2" <<'FIELDPY'
+import json, os, sys
+path, card, field = sys.argv[1], sys.argv[2], sys.argv[3]
+if not os.path.exists(path):
+    print("-"); raise SystemExit
+try:
+    r = json.load(open(path)).get("reviews", {})
+except Exception:
+    print("-"); raise SystemExit
+if card not in r:
+    print("-"); raise SystemExit
+print(json.dumps(r[card].get(field)))
+FIELDPY
+}
+
+expect_field_soon() { # label id field expected
+  local label="$1" card="$2" field="$3" want="$4" got=""
+  for _ in $(seq 1 25); do
+    got="$(state_field "$card" "$field")"
+    [ "$got" = "$want" ] && { ok "$label ($got)"; return; }
+    sleep 0.2
+  done
+  bad "$label — expected $want, got $got"
+  echo "         state: $STATE"
+  echo "         card:  $card"
+}
+
 deck_count() {
   python3 - "$DECK" <<'PY'
 import json, os, sys
@@ -395,6 +468,43 @@ wtype -k Escape; sleep 0.8                # back to review
 reveal_and_grade 3
 expect_soon "reviewing still works after touring the views" 1 answered
 overlay_toggle
+
+group "a card that lapses too often is taken out, and can be put back"
+# The unit tests prove the rule; this proves the rule reaches the file through
+# a real keystroke, that the card actually leaves the rotation, and that the
+# way back works - restoring is a write path of its own, and this plugin's
+# shipped bugs have all been in write paths.
+reset
+leech_id="$(first_card_id)"
+if [ -z "$leech_id" ]; then
+  bad "could not work out the first card's id - is the deck empty?"
+else
+  # One lapse below the default threshold, and due, so it is the card in front
+  # of you and the next "again" is the eighth.
+  seed_lapses "$leech_id" 7
+  overlay_toggle
+
+  reveal_and_grade "1"
+  expect_field_soon "the eighth lapse marks the card a leech" "$leech_id" "leech" "true"
+  expect_field_soon "and suspends it" "$leech_id" "suspended" "true"
+  expect_field_soon "the lapse itself still counted" "$leech_id" "lapses" "8"
+
+  # Out of the rotation means out: the card must not come back as the next one
+  # to answer, and must not be counted as waiting either.
+  key "r"
+  t_after="$(state_field "$leech_id" "suspended")"
+  expect "it stays suspended across a reload" "true" "$t_after"
+
+  # Restoring lives in the statistics, which is also the only place the count
+  # is shown.
+  key "s"
+  key "l"
+  expect_field_soon "l puts the card back" "$leech_id" "suspended" "false"
+  expect_field_soon "and keeps the leech mark" "$leech_id" "leech" "true"
+
+  key "s"
+  overlay_toggle
+fi
 
 group "nothing is left running or stranded"
 # Scoped to children of the shell, not a bare `pgrep -f`. A bare match also

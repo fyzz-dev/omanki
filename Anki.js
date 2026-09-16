@@ -34,6 +34,20 @@ var MAX_INTERVAL = 36500 * DAY
 
 var GRADES = ["again", "hard", "good", "easy"]
 
+// A card that keeps lapsing is a leech. Past some number of forgettings the
+// card itself is the problem - the question is ambiguous, or it is really two
+// facts wearing one front - and grinding it every few days costs more than it
+// returns. Anki's threshold is eight lapses, and it acts again every
+// half-threshold lapses after that rather than on every one, so a card you
+// have chosen to keep does not nag on every slip.
+var LEECH_THRESHOLD = 8
+
+// Anki tags the note "leech" as well as suspending it. This plugin cannot: the
+// deck is the user's own file, only ever written through the `a` composer, and
+// writing a tag into it on a lapse would break that promise for a card the
+// user never touched. The mark lives in the progress file, which is ours.
+var LEECH_SUSPEND = true
+
 // The most we will pull off disk in one read. An inflated file should not be
 // dragged into a process the whole desktop shares, so the read stops here —
 // which means a deck past it arrives with its tail cut off rather than whole.
@@ -47,6 +61,28 @@ function isGrade(g) {
 
 function clampEase(ease) {
   return Math.max(MIN_EASE, Math.min(MAX_EASE, Math.round(ease)))
+}
+
+// Has this lapse just made the card a leech? Anki fires at the threshold and
+// then every half-threshold lapses after it, so a leech left in the deck is
+// raised again at 8, 12, 16 rather than every single time.
+//
+// A threshold of 0 turns leeches off entirely, which is what the setting's 0
+// means and what a deck of deliberately hard cards wants.
+function isLeechLapse(lapses, threshold) {
+  var lf = Math.max(0, Math.round(num(threshold, LEECH_THRESHOLD)))
+  if (!lf || lapses < lf) return false
+  return (lapses - lf) % Math.max(1, Math.floor(lf / 2)) === 0
+}
+
+// Leech settings, defaulted. Kept in one place because grade() and the surfaces
+// both need them and a disagreement would be invisible.
+function leechConfig(opts) {
+  var o = opts || {}
+  return {
+    threshold: Math.max(0, Math.round(num(o.leechThreshold, LEECH_THRESHOLD))),
+    suspend: o.leechSuspend !== false
+  }
 }
 
 function clampInterval(seconds) {
@@ -119,7 +155,13 @@ function newState() {
     // The study day this card stopped being new. The day's new-card allowance
     // is counted from these rather than from a stored tally, so the count
     // cannot drift, double-count, or regress when documents are merged.
-    firstDay: ""
+    firstDay: "",
+    // Flagged as a leech at some point. Sticky, and kept after the card is
+    // restored, so the statistics can still say which cards have been trouble.
+    leech: false,
+    // Taken out of the rotation. The queue and the counts skip it entirely, so
+    // it is neither shown nor counted as waiting.
+    suspended: false
   }
 }
 
@@ -148,7 +190,12 @@ function normalizeState(state) {
     lapses: Math.max(0, Math.round(num(state.lapses, 0))),
     step: Math.max(0, Math.min(steps.length - 1, Math.round(num(state.step, 0)))),
     updated: Math.max(0, num(state.updated, 0)),
-    firstDay: text(state.firstDay)
+    firstDay: text(state.firstDay),
+    // Anything but a literal true is false: this comes off disk, and a card
+    // that is accidentally unsuspended is recoverable where one accidentally
+    // suspended just silently stops appearing.
+    leech: state.leech === true,
+    suspended: state.suspended === true
   }
 }
 
@@ -159,7 +206,11 @@ function normalizeState(state) {
 // `roll` is an optional number in [0, 1) used to spread the resulting interval
 // (see fuzzInterval). Omitting it means no spreading, which is what pricing a
 // button wants; the one call site that actually commits an answer passes one.
-function grade(state, g, now, roll) {
+//
+// `opts` carries the leech settings (see leechConfig). Leeches only ever arise
+// from a lapse and never change an interval, so pricing a button can leave it
+// out along with the roll.
+function grade(state, g, now, roll, opts) {
   var s = normalizeState(state)
   if (!isGrade(g)) return s
 
@@ -175,7 +226,11 @@ function grade(state, g, now, roll) {
     // Only the answer that ends a card's life as "new" dates it. A card
     // already in review keeps whatever it had, so re-answering an old card
     // never makes it look like one introduced today.
-    firstDay: s.phase === "new" ? dayKey(now) : s.firstDay
+    firstDay: s.phase === "new" ? dayKey(now) : s.firstDay,
+    // Both carried rather than reset. Answering a restored leech must not
+    // quietly clear the mark that says it has been one.
+    leech: s.leech,
+    suspended: s.suspended
   }
 
   // ------------------------------------------------- new and learning cards
@@ -260,6 +315,16 @@ function grade(state, g, now, roll) {
     next.phase = "relearning"
     next.step = 0
     next.due = now + RELEARNING_STEPS[0]
+
+    // Only a review card can lapse, so this is the only place a leech is made.
+    // The card is still scheduled normally underneath: suspending hides it
+    // rather than rewriting what it would do, so restoring one puts it back
+    // exactly where the scheduler had it rather than at the start.
+    var leech = leechConfig(opts)
+    if (isLeechLapse(next.lapses, leech.threshold)) {
+      next.leech = true
+      if (leech.suspend) next.suspended = true
+    }
     return next
   }
 
@@ -645,6 +710,9 @@ function buildQueue(cards, progress, now, newPerDay, reviewsPerDay) {
   for (var i = 0; i < cards.length; i++) {
     var card = cards[i]
     var s = stateFor(rolled, card.id)
+    // A suspended card is out of the rotation entirely - not shown, not
+    // counted, and not waiting. It is the only state that skips both queues.
+    if (s.suspended) continue
     if (s.phase === "new") {
       if (fresh.length < remaining) fresh.push(card.id)
     } else if (s.due <= now) {
@@ -693,11 +761,17 @@ function counts(cards, progress, now, newPerDay, reviewsPerDay) {
     learning: 0,
     fresh: 0,
     waiting: 0,
-    nextDue: 0
+    nextDue: 0,
+    suspended: 0
   }
 
   for (var i = 0; i < cards.length; i++) {
     var s = stateFor(rolled, cards[i].id)
+
+    // Counted on its own and excluded from everything else, so a deck whose
+    // remainder is all suspended reads as done rather than as waiting on a
+    // card that is never coming.
+    if (s.suspended) { out.suspended++; continue }
 
     if (s.phase === "new") {
       out.fresh++
@@ -746,6 +820,8 @@ function deckStats(cards, progress, now, newPerDay, reviewsPerDay) {
     lapsed: 0,       // cards that have lapsed at least once
     easeSum: 0,
     easeCount: 0,
+    leeches: 0,      // flagged as a leech at some point, restored or not
+    suspended: 0,    // currently out of the rotation
     answeredToday: 0,
     introducedToday: introducedToday(progress, now),
     reviewsToday: reviewsToday(progress, now),
@@ -757,8 +833,14 @@ function deckStats(cards, progress, now, newPerDay, reviewsPerDay) {
   for (var i = 0; i < list.length; i++) {
     var s = stateFor(progress, list[i].id)
 
+    if (s.leech) out.leeches++
+    if (s.suspended) out.suspended++
+
     if (s.phase === "new") { out.fresh++; continue }
 
+    // A suspended card keeps its place in the composition: it is still a card
+    // in the deck at whatever maturity it reached, and hiding it there would
+    // make the bar stop adding up to the deck.
     if (s.phase === "learning" || s.phase === "relearning") out.learning++
     else if (s.interval >= MATURE_INTERVAL) out.mature++
     else out.young++
@@ -773,6 +855,11 @@ function deckStats(cards, progress, now, newPerDay, reviewsPerDay) {
 
     // Seven days ahead, bucketed by day. Anything already due lands in the
     // first bucket, because "today" is what you would be shown now.
+    //
+    // A suspended card is left out: its due date is still there underneath and
+    // still moves, but nothing will show it, and a forecast that counts cards
+    // that are not coming is worse than no forecast.
+    if (s.suspended) continue
     var days = Math.floor((s.due - now) / DAY)
     if (days < 0) days = 0
     if (days < out.forecast.length) out.forecast[days]++
@@ -791,6 +878,38 @@ function deckStats(cards, progress, now, newPerDay, reviewsPerDay) {
   out.dueLeft = left.due
 
   return out
+}
+
+// Put every suspended card back in the rotation. The leech mark is kept: the
+// card has been trouble and the statistics should go on saying so - what is
+// cleared is only the part that hides it.
+//
+// Returns the new document and the number of cards it put back, as a pair
+// rather than a count hung off the document - serializeProgress would drop it
+// silently today, and a document that sometimes carries a tally is the kind of
+// thing that survives until something does read it.
+//
+// Every card it changes is stamped, so the change survives the
+// read-merge-write the other surface may be doing at the same moment. Cards it
+// does not change keep the stamp they had, so restoring does not make an
+// untouched card look newer than an answer somewhere else.
+function unsuspendAll(progress, now) {
+  var reviews = (progress && progress.reviews) || {}
+  var out = { reviews: {} }
+  var restored = 0
+
+  for (var id in reviews) {
+    if (!Object.prototype.hasOwnProperty.call(reviews, id)) continue
+    var s = normalizeState(reviews[id])
+    if (s.suspended) {
+      s.suspended = false
+      s.updated = now
+      restored++
+    }
+    out.reviews[id] = s
+  }
+
+  return { progress: out, restored: restored }
 }
 
 function percent(fraction) {

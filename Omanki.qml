@@ -51,10 +51,32 @@ Item {
   readonly property int newPerDay: Anki.sanePerDay(root.pluginSettings.newPerDay)
   readonly property var tags: Anki.normalizeTags(root.pluginSettings.tags)
   readonly property int reviewsPerDay: Anki.sanePerDay(root.pluginSettings.reviewsPerDay, 0)
+  readonly property int leechThreshold:
+      Anki.sanePerDay(root.pluginSettings.leechThreshold, Anki.LEECH_THRESHOLD)
+  readonly property bool leechSuspend: root.pluginSettings.leechSuspend !== false
 
   // review | stats | add. The overlay is the surface with room for more than
   // one card, so it is the one that gets the other two.
   property string mode: "review"
+
+  // What `l` last did, shown under the statistics for a few seconds. Restoring
+  // nothing is worth saying too: the alternative is a key that appears to do
+  // nothing on a deck whose leeches are only flagged and not suspended.
+  property string restoreNotice: ""
+
+  Timer {
+    id: restoreNoticeTimer
+    interval: 6000
+    onTriggered: root.restoreNotice = ""
+  }
+
+  function restoreLeeches() {
+    var n = reviewer.restoreLeeches()
+    root.restoreNotice = n > 0
+        ? (n === 1 ? "1 card restored" : n + " cards restored")
+        : "No suspended cards to restore"
+    restoreNoticeTimer.restart()
+  }
 
   // Wide enough to read a sentence without becoming a wall of text, and capped
   // so it does not stretch across an ultrawide.
@@ -165,6 +187,10 @@ Item {
           var k = event.text ? event.text.toLowerCase() : ""
           if (k === "s") root.mode = (root.mode === "stats" ? "review" : "stats")
           else if (k === "a") root.showAdd()
+          // Restoring is offered wherever the leech count is, which is the
+          // statistics — so this one is handled before the bail-out that keeps
+          // the grade keys to the review surface.
+          else if (k === "l") root.restoreLeeches()
           else if (root.mode !== "review") return
           else if (k === "1") reviewer.answer("again")
           else if (k === "2") reviewer.answer("hard")
@@ -264,6 +290,8 @@ Item {
             stateDir: Quickshell.env("HOME") + "/.local/state/omarchy"
             newPerDay: root.newPerDay
             reviewsPerDay: root.reviewsPerDay
+            leechThreshold: root.leechThreshold
+            leechSuspend: root.leechSuspend
             tags: root.tags
             active: root.opened
             foreground: root.foreground
@@ -315,9 +343,14 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             visible: root.mode === "review"
-            text: (reviewer.revealed ? "1-4 grade  ·  space good" : "space reveal")
-                + (reviewer.canUndo ? "  ·  u undo" : "")
-                + "  ·  s stats  ·  a add  ·  esc close"
+            // The leech notice replaces the hints rather than crowding in
+            // beside them: a card has just been taken out of the rotation, and
+            // for those few seconds that is the more useful thing to read.
+            text: reviewer.leechNotice
+                ? reviewer.leechNotice + "  ·  s stats to restore"
+                : (reviewer.revealed ? "1-4 grade  ·  space good" : "space reveal")
+                  + (reviewer.canUndo ? "  ·  u undo" : "")
+                  + "  ·  s stats  ·  a add  ·  esc close"
             color: root.foreground
             opacity: 0.4
             font.family: root.fontFamily
@@ -329,7 +362,10 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             visible: root.mode === "stats"
-            text: "s back to review  ·  a add a card  ·  esc close"
+            text: (root.restoreNotice ? root.restoreNotice + "  ·  " : "")
+                + "s back to review"
+                + (reviewer.deckStats && reviewer.deckStats.suspended > 0 ? "  ·  l restore leeches" : "")
+                + "  ·  a add a card  ·  esc close"
             color: root.foreground
             opacity: 0.4
             font.family: root.fontFamily
