@@ -251,6 +251,15 @@ itself, *Easy* adds a 1.3 bonus and earns 150 ease. Ease is held between 1.3
 and 3.0. A passing grade always pushes the card further out than it was, even
 when the multiplier rounds to nothing.
 
+Each new interval is then **spread** over a small band around itself — a few
+percent for a long one, proportionally more for a short one, the same bands
+Anki uses. Cards answered together otherwise come due together and stay that
+way, and a deck built in a few sittings collapses into a few permanent clumps.
+The spread is applied when you answer, not when the grades are priced, so the
+interval on each button is the unspread one and holds still while you decide.
+Lapses and leaving relearning are not spread: those restore an interval the
+card already had rather than computing a new one.
+
 *Again* on a review card is a **lapse**: it costs 200 ease, halves the
 interval, and sends the card through a 10-minute relearning step. Coming out
 of relearning restores that halved interval rather than starting over at a
@@ -336,6 +345,9 @@ plugin creates are set private (0700), and the data files themselves are 0600.
 
 Reads additionally refuse anything that is not a regular file and open
 non-blocking, so a planted FIFO cannot stall the shell, stopping at 256 KiB.
+A deck past that limit arrives truncated, which the parser recognises by size
+and reports as *too large* rather than as a syntax error in your file — and
+the `a` composer refuses to write a deck it only half read.
 Writes send the document over stdin, so nothing in a card is ever interpolated
 into a shell, and land via a fresh 0600 temp file renamed over the destination.
 
@@ -368,9 +380,10 @@ The scheduler is deliberately free of QML types, so it runs under plain node:
 node tests/scheduler.test.mjs
 ```
 
-That covers the learning steps, interval growth, lapses and recovery, the
-clamps, deck parsing, queue order, the 4am rollover, document merging, and the
-hardening on both file-I/O snippets.
+That covers the learning steps, interval growth and spreading, lapses and
+recovery, the clamps, deck parsing, an oversized deck being reported as such,
+queue order, the 4am rollover, document merging, and the hardening on both
+file-I/O snippets.
 
 Those tests are pure: they know nothing about processes, files, or two
 surfaces being open at once. Every bug this plugin has actually shipped lived

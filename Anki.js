@@ -34,6 +34,13 @@ var MAX_INTERVAL = 36500 * DAY
 
 var GRADES = ["again", "hard", "good", "easy"]
 
+// The most we will pull off disk in one read. An inflated file should not be
+// dragged into a process the whole desktop shares, so the read stops here —
+// which means a deck past it arrives with its tail cut off rather than whole.
+// READ_SH applies this and parseDeck recognises having hit it, so the two have
+// to agree; that is why it is named once here instead of written twice.
+var READ_LIMIT = 262144
+
 function isGrade(g) {
   return GRADES.indexOf(g) !== -1
 }
@@ -46,11 +53,55 @@ function clampInterval(seconds) {
   return Math.max(MIN_REVIEW_INTERVAL, Math.min(MAX_INTERVAL, Math.round(seconds)))
 }
 
+// Cards answered in one sitting come due in one sitting, and answering them
+// together again keeps them together — a deck studied in a few sessions
+// collapses into a few permanent clumps. Anki spreads each interval over a
+// small band around itself to break that up, widening with the interval, and
+// these are its ranges.
+//
+// The roll is handed in rather than drawn here so that grade() stays pure: the
+// same state, grade and roll always produce the same answer. That is what lets
+// previewIntervals price all four buttons by calling grade() itself — it
+// passes no roll, so the labels show the unfuzzed interval and hold still
+// under the cursor instead of flickering on every repaint.
+function fuzzInterval(seconds, roll) {
+  var r = Number(roll)
+  if (!isFinite(r)) return seconds        // no roll: previews, and the tests
+  r = Math.max(0, Math.min(0.999999, r))
+
+  var days = Math.round(seconds / DAY)
+  if (days < 2) return seconds            // a day cannot be spread anywhere
+
+  var low, high
+  if (days === 2) {
+    // Anki's one asymmetric case: never pull a 2-day card back to 1 day.
+    low = 2
+    high = 3
+  } else {
+    var band
+    if (days < 7) band = Math.floor(days * 0.25)
+    else if (days < 30) band = Math.max(2, Math.floor(days * 0.15))
+    else band = Math.max(4, Math.floor(days * 0.05))
+    band = Math.max(1, band)
+    low = days - band
+    high = days + band
+  }
+
+  return clampInterval((low + Math.floor(r * (high - low + 1))) * DAY)
+}
+
 // Every successful answer has to move the card further out than it was, even
 // when the multiplier rounds to nothing — otherwise a card with a short
 // interval and a low ease can sit at the same spacing forever.
-function grow(interval, factor) {
-  return clampInterval(Math.max(interval + DAY, interval * factor))
+//
+// Fuzz is applied inside that guarantee, not after it: the band around a short
+// interval can reach back far enough to land on the interval the card already
+// had (3 days grown at minimum ease is 4, whose band opens at 3), and a
+// "correct" answer that changes nothing is the thing this floor exists to
+// prevent. Spreading happens within the half of the band that still moves.
+function grow(interval, factor, roll) {
+  var floor = interval + DAY
+  return clampInterval(Math.max(floor, fuzzInterval(Math.max(floor, interval * factor), roll)))
 }
 
 function newState() {
@@ -104,7 +155,11 @@ function normalizeState(state) {
 // Answer one card. Returns the next state and never mutates the one passed in,
 // so a caller can price every button (see previewIntervals) before committing
 // to any of them.
-function grade(state, g, now) {
+//
+// `roll` is an optional number in [0, 1) used to spread the resulting interval
+// (see fuzzInterval). Omitting it means no spreading, which is what pricing a
+// button wants; the one call site that actually commits an answer passes one.
+function grade(state, g, now, roll) {
   var s = normalizeState(state)
   if (!isGrade(g)) return s
 
@@ -146,8 +201,10 @@ function grade(state, g, now) {
       if (step >= LEARNING_STEPS.length) {
         next.phase = "review"
         next.step = 0
-        next.interval = GRADUATING_INTERVAL
-        next.due = now + GRADUATING_INTERVAL
+        // Graduating is a day, which has nowhere to spread to; fuzzed anyway
+        // so that a longer first interval would be spread if one were set.
+        next.interval = fuzzInterval(GRADUATING_INTERVAL, roll)
+        next.due = now + next.interval
       } else {
         next.phase = "learning"
         next.step = step
@@ -158,15 +215,17 @@ function grade(state, g, now) {
       // Easy skips the remaining steps entirely.
       next.phase = "review"
       next.step = 0
-      next.interval = EASY_INTERVAL
-      next.due = now + EASY_INTERVAL
+      next.interval = fuzzInterval(EASY_INTERVAL, roll)
+      next.due = now + next.interval
     }
     return next
   }
 
   // ------------------------------------------------------- relearning cards
   // The interval was already cut when the card lapsed, so leaving relearning
-  // restores that reduced interval rather than starting over at a day.
+  // restores that reduced interval rather than starting over at a day. It is
+  // restored as it was, unspread: it is an interval this card already had, not
+  // a newly computed one, and Anki leaves this case alone too.
   if (s.phase === "relearning") {
     if (g === "again") {
       next.step = 0
@@ -206,12 +265,12 @@ function grade(state, g, now) {
 
   if (g === "hard") {
     next.ease = clampEase(s.ease - 150)
-    next.interval = grow(s.interval, HARD_MULTIPLIER)
+    next.interval = grow(s.interval, HARD_MULTIPLIER, roll)
   } else if (g === "good") {
-    next.interval = grow(s.interval, s.ease / 1000)
+    next.interval = grow(s.interval, s.ease / 1000, roll)
   } else {
     next.ease = clampEase(s.ease + 150)
-    next.interval = grow(s.interval, (next.ease / 1000) * EASY_BONUS)
+    next.interval = grow(s.interval, (next.ease / 1000) * EASY_BONUS, roll)
   }
 
   next.due = now + next.interval
@@ -273,6 +332,35 @@ function text(value) {
   return value === undefined || value === null ? "" : String(value).trim()
 }
 
+// The read cap counts bytes, and a deck of accented or CJK text spends more
+// bytes than it has characters, so asking the string for its length would
+// under-count exactly the decks most likely to be near the limit.
+function utf8Length(s) {
+  var n = 0
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if (c < 0x80) n += 1
+    else if (c < 0x800) n += 2
+    else if (c >= 0xd800 && c <= 0xdbff) { n += 4; i++ }  // surrogate pair
+    else n += 3
+  }
+  return n
+}
+
+// Did this text come back having filled the read? `dd` stops at one block, so
+// a file larger than the cap is delivered truncated and silently — the only
+// evidence is the size of what arrived.
+//
+// The comparison allows a few bytes of slack because the cut can land inside a
+// multi-byte character, and the stray bytes are dropped or replaced on the way
+// through the decoder, so a truncated read can measure slightly short of the
+// cap once re-encoded.
+function hitReadLimit(raw) {
+  return utf8Length(text(raw)) >= READ_LIMIT - 3
+}
+
+var TOO_LARGE = "Deck is too large — over " + Math.round(READ_LIMIT / 1024) + " KiB"
+
 // Accepts either a bare array or `{ "cards": [...] }`, because both are things
 // a person plausibly types into a deck file. Entries missing a front or a back
 // are dropped rather than shown as blank cards, and the first id wins on a
@@ -282,6 +370,10 @@ function parseDeck(raw) {
   try {
     data = JSON.parse(raw || "")
   } catch (e) {
+    // A deck past the cap fails to parse because its tail was cut off, which
+    // has nothing to do with how it was written. Saying "not valid JSON" sends
+    // the user looking for a syntax error that is not there.
+    if (hitReadLimit(raw)) return { cards: [], error: TOO_LARGE }
     return { cards: [], error: "Deck is not valid JSON" }
   }
 
@@ -392,6 +484,13 @@ function appendCard(raw, front, back, tags) {
   var b = text(back)
   if (!f) return { error: "A card needs a front", raw: raw }
   if (!b) return { error: "A card needs a back", raw: raw }
+
+  // Checked before parsing rather than as a parse failure, because this is the
+  // path that writes. Truncated JSON all but always fails to parse and would
+  // be refused below anyway — but "all but always" is the wrong standard for
+  // the one operation that could replace a deck with a shortened copy of
+  // itself, so the size is what decides it.
+  if (hitReadLimit(raw)) return { error: TOO_LARGE + " — leaving it alone", raw: raw }
 
   var data
   if (!text(raw)) {
@@ -779,7 +878,7 @@ var READ_SH = [
   'f="/proc/self/fd/9/$name"',
   '[ -L "$f" ] && exit 65',
   '[ -f "$f" ] || exit 0',
-  'exec dd if="$f" iflag=nofollow,nonblock bs=262144 count=1 2>/dev/null'
+  'exec dd if="$f" iflag=nofollow,nonblock bs=' + READ_LIMIT + ' count=1 2>/dev/null'
 ].join("\n")
 
 // Writing. The document arrives on stdin, so nothing about it is interpolated

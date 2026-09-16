@@ -26,7 +26,7 @@ const EXPORTS = [
   "mergeProgress", "introducedToday", "reviewsToday", "remainingToday",
   "deckStats", "percent", "appendCard", "dirOf", "baseOf", "MATURE_INTERVAL",
   "resolveDeck", "sanePerDay", "normalizeTags", "filterByTags", "sectionLabel", "promote", "UNDO_DEPTH",
-  "READ_SH", "WRITE_SH", "relativeToHome",
+  "READ_SH", "WRITE_SH", "relativeToHome", "READ_LIMIT", "fuzzInterval", "hitReadLimit",
 ]
 const G = {}
 new Function("exports", `${src}\nfor (const k of ${JSON.stringify(EXPORTS)}) exports[k] = eval(k)`)(G)
@@ -710,6 +710,129 @@ group("reading, when there is simply nothing there")
   writeFileSync(join(home2, REL), "x".repeat(500_000))
   t("an oversized file is truncated, not swallowed whole",
     sh(G.READ_SH, home2, REL).stdout.length === 262_144)
+
+  // The cap the shell applies and the cap the parser recognises are the same
+  // number, so a deck cut off by the first is reported as such by the second.
+  t("the shell reads exactly as far as READ_LIMIT says",
+    sh(G.READ_SH, home2, REL).stdout.length === G.READ_LIMIT)
+
+  // End to end, through the real read rather than a string sliced to look like
+  // one: the shell truncating and the parser noticing are two halves of the
+  // same fix, and the bug was that they did not know about each other.
+  writeFileSync(join(home2, REL), JSON.stringify({ cards: Array.from(
+    { length: 12_000 }, (_, i) => ({ front: "q" + i, back: "a" + i })) }))
+  t("a real oversized deck comes back reported as too large",
+    /too large/i.test(G.parseDeck(sh(G.READ_SH, home2, REL).stdout).error))
+}
+
+group("a deck too large to read says so")
+{
+  // A truncated deck fails to parse, but not for any reason the user can find
+  // by looking at their file. Reporting it as a syntax error sends them
+  // hunting for a missing brace that is not there.
+  const whole = JSON.stringify({ cards: Array.from({ length: 12_000 },
+    (_, i) => ({ front: "q" + i, back: "a" + i })) })
+  const cut = whole.slice(0, G.READ_LIMIT)
+
+  t("a deck under the cap still parses",
+    G.parseDeck(JSON.stringify({ cards: [{ front: "q", back: "a" }] })).cards.length === 1)
+
+  const r = G.parseDeck(cut)
+  t("a truncated deck is reported as too large", /too large/i.test(r.error))
+  t("a truncated deck is not blamed on the user's JSON", !/valid JSON/i.test(r.error))
+  t("a truncated deck yields no cards", r.cards.length === 0)
+
+  // The distinction has to survive genuinely broken input: a short file with a
+  // real syntax error is still a syntax error.
+  const broken = G.parseDeck('{"cards": [')
+  t("a small unparseable deck is still reported as invalid JSON",
+    /valid JSON/i.test(broken.error) && !/too large/i.test(broken.error))
+
+  // The cap counts bytes, so a deck of multi-byte text hits it at far fewer
+  // characters than an ASCII one. Measuring the string would miss it.
+  const wide = "\u6f22".repeat(Math.ceil(G.READ_LIMIT / 3))
+  t("a multi-byte deck is measured in bytes, not characters",
+    G.hitReadLimit(wide) && wide.length < G.READ_LIMIT)
+  t("an ordinary deck is not mistaken for a truncated one",
+    !G.hitReadLimit('{"cards":[]}'))
+
+  // Appending is the only path that writes the deck, so it refuses on size
+  // before it parses rather than relying on the parse to fail.
+  const a = G.appendCard(cut, "new front", "new back")
+  t("appending to a truncated deck is refused", /too large/i.test(a.error))
+  t("appending to a truncated deck hands the file back untouched", a.raw === cut)
+}
+
+group("intervals are spread so cards do not stay clumped")
+{
+  const st = (over) => Object.assign(G.newState(), over)
+  const ivl = (state, g, roll) => G.grade(state, g, 0, roll).interval / G.DAY
+
+  // Without a roll nothing moves: this is what previewIntervals relies on, so
+  // the priced labels hold still while the card is on screen.
+  const base = st({ phase: "review", interval: 100 * G.DAY, ease: 2500, reps: 5 })
+  t("no roll means no spreading", ivl(base, "good") === 250)
+  t("an undefined roll is not treated as zero",
+    ivl(base, "good", undefined) === 250)
+  t("a preview and an unfuzzed grade agree",
+    G.previewIntervals(base, 0).good === G.formatInterval(G.grade(base, "good", 0).due))
+
+  // 5% band on a long interval: 250 days spreads over 238-262.
+  const lo = ivl(base, "good", 0)
+  const hi = ivl(base, "good", 0.999999)
+  t("the low end of a long interval's band is 5% short", lo === 238)
+  t("the high end of a long interval's band is 5% long", hi === 262)
+  t("the unspread interval sits inside its own band", lo < 250 && 250 < hi)
+
+  // The band widens with the interval, which is the whole point: a 3-week card
+  // spreads by days, a 3-day card by less than one.
+  const short = st({ phase: "review", interval: 10 * G.DAY, ease: 2500, reps: 5 })
+  t("a mid-length interval uses the 15% band",
+    ivl(short, "good", 0) === 22 && ivl(short, "good", 0.999999) === 28)
+
+  // Every roll has to land inside the band, and never below the floor that
+  // guarantees a passing answer moves the card further out than it was.
+  let inBand = true, moved = true
+  for (let i = 0; i <= 100; i++) {
+    const v = ivl(base, "good", i / 100)
+    if (v < 238 || v > 262) inBand = false
+    if (v <= 100) moved = false
+  }
+  t("every roll lands inside the band", inBand)
+  t("every roll still moves the card further out", moved)
+
+  // The case the floor exists for: 3 days at minimum ease grows to 4, whose
+  // band opens at 3 — the interval the card already had.
+  const tight = st({ phase: "review", interval: 3 * G.DAY, ease: 1300, reps: 9 })
+  let never = true
+  for (let i = 0; i <= 100; i++) if (ivl(tight, "good", i / 100) <= 3) never = false
+  t("spreading never cancels a passing answer's progress", never)
+
+  // Rolls are drawn by the caller, but the state comes off disk and the value
+  // is a number from somewhere; nonsense must not produce a nonsense interval.
+  t("a nonsense roll is ignored rather than propagated",
+    ivl(base, "good", NaN) === 250 && ivl(base, "good", "x") === 250)
+  t("a roll out of range is clamped to the band",
+    ivl(base, "good", -5) === 238 && ivl(base, "good", 5) === 262)
+
+  // Matching Anki: learning steps, lapses and leaving relearning are not
+  // spread, and a 1-day graduating interval has nowhere to go.
+  t("graduating at one day is unchanged by any roll",
+    ivl(st({ phase: "learning", step: 1 }), "good", 0) === 1 &&
+    ivl(st({ phase: "learning", step: 1 }), "good", 0.99) === 1)
+  t("easy out of learning is spread over 3-5 days",
+    ivl(st({}), "easy", 0) === 3 && ivl(st({}), "easy", 0.999999) === 5)
+  t("a lapse is not spread",
+    ivl(st({ phase: "review", interval: 100 * G.DAY, reps: 5 }), "again", 0.99) === 50)
+  t("leaving relearning restores the interval exactly",
+    ivl(st({ phase: "relearning", interval: 50 * G.DAY, reps: 6 }), "good", 0.99) === 50)
+
+  // A two-day card is Anki's one asymmetric case: it may lengthen but must
+  // never be pulled back to a single day.
+  t("a two-day interval spreads upward only",
+    G.fuzzInterval(2 * G.DAY, 0) === 2 * G.DAY &&
+    G.fuzzInterval(2 * G.DAY, 0.999999) === 3 * G.DAY)
+  t("a one-day interval cannot be spread", G.fuzzInterval(G.DAY, 0.999999) === G.DAY)
 }
 
 group("the document itself is never interpolated")

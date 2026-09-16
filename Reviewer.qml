@@ -175,7 +175,11 @@ Item {
 
     var id = root.currentId
     var before = Anki.stateFor(root.progress, id)
-    var after = Anki.grade(before, g, root.now)
+    // The roll is drawn here rather than inside the scheduler, so that the
+    // interval spreads once — at the moment the answer is committed — and the
+    // priced labels above, which grade the same card without a roll, keep
+    // showing a number that does not move while you decide.
+    var after = Anki.grade(before, g, root.now, Math.random())
 
     // Copied rather than mutated in place: `progress` is a var property, and
     // QML only re-evaluates the bindings that depend on it when the reference
