@@ -90,7 +90,7 @@ Column {
           { label: "mature",   key: "mature" },
           { label: "young",    key: "young" },
           { label: "learning", key: "learning" },
-          { label: "new",      key: "fresh" }
+          { label: "unseen",   key: "fresh" }
         ]
 
         Text {
