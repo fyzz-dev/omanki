@@ -153,8 +153,12 @@ the week ahead, six figures and the leeches on one page. The panel is about a
 card wide, where that same page would be a column of squeezed rows saying
 everything badly — so it uses **tabs**: `DECK`, `DUE`, `TODAY`, and `LEECHES`
 once there is a leech to show. One thing at a time, each sized to the space
-actually there, and the strip across the top says what else there is, which a
-scrolling column never does. Walk them with `←` and `→`, or click.
+actually there, and the strip says what else there is, which a scrolling column
+never does. Walk them with `←` and `→`, or click.
+
+The strip rides on the end of the `STATISTICS` line rather than sitting under
+it. A row of small-caps tabs directly below the small-caps word crowded both and
+spent a row of a panel that has few to spare.
 
 Both read the same numbers, so there is one calculation behind two
 presentations rather than two of either.
@@ -530,6 +534,7 @@ write, so a fixed sleep tests the machine's mood rather than the plugin.
 | `CardComposer.qml` | The add-a-card form behind `a`, in the overlay only. |
 | `StatsView.qml` | The statistics behind `s` in the overlay, on one page. |
 | `PanelStats.qml` | The same numbers in tabs, for the width the bar panel has. |
+| `StatsTabs.qml` | The tab strip, which rides on the panel's section header. |
 | `Panel.qml` | The bar widget and the panel chrome around the session. |
 | `Omanki.qml` | The fullscreen overlay chrome around the same session. |
 

@@ -58,6 +58,28 @@ Panel {
     onTriggered: root.restoreNotice = ""
   }
 
+  // Which statistics tab is showing. Held here because the strip that changes
+  // it rides on the section header while the body it drives is further down the
+  // column: one property both of them read, rather than a value bound in two
+  // directions between two siblings.
+  property int statsTab: 0
+
+  // Wraps, so the arrows walk the strip in a circle rather than stopping at the
+  // ends and leaving the reader to work out which end they are on.
+  function stepTab(delta) {
+    var n = stats.count
+    if (n > 0) root.statsTab = ((root.statsTab + delta) % n + n) % n
+  }
+
+  // The leech tab appears and disappears with the leeches, and the last one
+  // being restored must not leave the view pointing past the end of the strip.
+  Connections {
+    target: stats
+    function onCountChanged() {
+      if (root.statsTab >= stats.count) root.statsTab = Math.max(0, stats.count - 1)
+    }
+  }
+
   function showStats() { root.mode = "stats" }
   function showReview() { root.mode = "review" }
   function toggleStats() { root.mode = root.mode === "stats" ? "review" : "stats" }
@@ -120,7 +142,7 @@ Panel {
       // arrows instead, which is what a row of tabs suggests anyway.
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onMoveRequested: function(dx, dy) {
-        if (root.mode === "stats" && dx !== 0) stats.step(dx > 0 ? 1 : -1)
+        if (root.mode === "stats" && dx !== 0) root.stepTab(dx > 0 ? 1 : -1)
       }
 
       onTextKey: function(t) {
@@ -201,14 +223,38 @@ Panel {
           foreground: root.foreground
         }
 
-        PanelSectionHeader {
-          textFormat: Text.PlainText
+        // The section header and, in the statistics, the tab strip on the end
+        // of the same line. Stacking the strip under the header put two rows of
+        // small-caps text against each other, which crowded both and spent a
+        // row of a panel that has few to spare.
+        Item {
           width: parent.width
-          text: root.mode === "stats"
-              ? "STATISTICS"
-              : Anki.sectionLabel(reviewer.phase, reviewer.currentState, root.tags)
-          foreground: root.foreground
-          fontFamily: root.fontFamily
+          height: Math.max(sectionHeader.implicitHeight, tabStrip.height)
+
+          PanelSectionHeader {
+            id: sectionHeader
+            textFormat: Text.PlainText
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.mode === "stats"
+                ? "STATISTICS"
+                : Anki.sectionLabel(reviewer.phase, reviewer.currentState, root.tags)
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          StatsTabs {
+            id: tabStrip
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.mode === "stats"
+            tabs: stats.tabs
+            current: root.statsTab
+            foreground: root.foreground
+            accent: Color.accent
+            fontFamily: root.fontFamily
+            onSelected: function(i) { root.statsTab = i }
+          }
         }
 
         PanelStats {
@@ -216,6 +262,7 @@ Panel {
           width: parent.width
           visible: root.mode === "stats"
           stats: reviewer.deckStats
+          tab: root.statsTab
           foreground: root.foreground
           accent: Color.accent
           urgent: root.urgent

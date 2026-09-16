@@ -12,9 +12,15 @@ import "Anki.js" as Anki
 // squeezed rows that says everything badly.
 //
 // So the panel gets tabs. One thing at a time, each sized to the space actually
-// available, and the strip across the top says what else there is — which a
-// scrolling column never does. Both views read the same `stats` object, so
-// there is one calculation behind two presentations rather than two of either.
+// available, and the strip says what else there is — which a scrolling column
+// never does. Both views read the same `stats` object, so there is one
+// calculation behind two presentations rather than two of either.
+//
+// The strip itself is StatsTabs, and it lives on the end of the section header
+// rather than above this: a row of small-caps tabs directly under the
+// small-caps word "STATISTICS" was two lines saying nearly the same thing, and
+// they crowded each other. This exposes `tabs` so the strip can render it, and
+// takes `tab` from the panel, which owns it.
 Item {
   id: root
 
@@ -24,9 +30,9 @@ Item {
   property color urgent: Color.urgent
   property string fontFamily: Style.font.family
 
-  // Which tab is showing. Kept here rather than pushed in by the host: the
-  // panel hides this component when it closes but never destroys it, so the
-  // tab you were last reading is still the one you come back to.
+  // Which tab is showing. Owned by the panel, because the strip that changes it
+  // is up in the header and this is down in the body: one property read by
+  // both beats a value bound in two directions between them.
   property int tab: 0
 
   signal restoreRequested()
@@ -45,71 +51,7 @@ Item {
 
   readonly property int count: root.tabs.length
 
-  function select(i) {
-    root.tab = Math.max(0, Math.min(root.count - 1, i))
-  }
-
-  // Wraps, so the arrow keys walk the strip in a circle rather than stopping
-  // at the ends and leaving the reader to work out which end they are on.
-  function step(delta) {
-    root.tab = ((root.tab + delta) % root.count + root.count) % root.count
-  }
-
-  // A tab that disappears - the leech one, once the last leech is restored -
-  // must not leave the view pointing past the end of the strip.
-  onCountChanged: if (root.tab >= root.count) root.tab = root.count - 1
-
-  implicitHeight: strip.height + Style.spacing.md + body.height
-
-  // ------------------------------------------------------------- the strip
-  Row {
-    id: strip
-    width: parent.width
-    spacing: Style.spacing.md
-
-    Repeater {
-      model: root.tabs
-
-      Item {
-        id: chip
-        required property var modelData
-        required property int index
-        readonly property bool active: root.tab === chip.index
-
-        width: label.implicitWidth
-        height: label.implicitHeight + Style.spacing.xs + Style.space(2)
-
-        Text {
-          id: label
-          textFormat: Text.PlainText
-          text: chip.modelData
-          color: chip.active ? root.accent : root.foreground
-          opacity: chip.active ? 1.0 : 0.45
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-        }
-
-        // An underline rather than a filled chip: at this size a border round
-        // every tab is more chrome than content, and the panel's other
-        // section headers are already plain small-caps text.
-        Rectangle {
-          anchors.bottom: parent.bottom
-          width: parent.width
-          height: Style.space(2)
-          radius: Style.cornerRadius > 0 ? height : 0
-          color: root.accent
-          visible: chip.active
-        }
-
-        MouseArea {
-          anchors.fill: parent
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.select(chip.index)
-        }
-      }
-    }
-  }
+  implicitHeight: body.height
 
   // --------------------------------------------------------------- the body
   //
@@ -124,8 +66,6 @@ Item {
     // rechecked every time a tab gains a line.
     height: Math.max(deckTab.implicitHeight, dueTab.implicitHeight,
                      todayTab.implicitHeight, leechTab.implicitHeight)
-    anchors.top: strip.bottom
-    anchors.topMargin: Style.spacing.md
 
     // ------------------------------------------------------------ deck
     Column {
