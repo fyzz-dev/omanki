@@ -159,6 +159,32 @@ expect_soon() { # label expected probe-arg
   bad "$label — expected $want, got $got"
 }
 
+# Did the plugin log a refusal matching this pattern since the run began?
+#
+# "The deck did not change" is a negative assertion, and an add that never
+# reached the deck at all satisfies it just as well as one the plugin correctly
+# turned down. Asserting the stated reason is what tells the two apart, and it
+# is the only assertion here that would have failed loudly on a misdirected add
+# rather than passing quietly.
+refused_since() { # pattern since
+  journalctl --user --since "$2" --no-pager 2>/dev/null \
+    | grep -F "omanki: add refused:" \
+    | grep -qiE "$1"
+}
+
+expect_refusal() { # label pattern since
+  local label="$1" pattern="$2" since="$3"
+  for _ in $(seq 1 25); do
+    refused_since "$pattern" "$since" && { ok "$label"; return; }
+    sleep 0.2
+  done
+  bad "$label — nothing matching /$pattern/ was logged"
+  echo "         refusals logged since ${since}:"
+  journalctl --user --since "$since" --no-pager 2>/dev/null \
+    | grep -F "omanki: add refused:" | tail -3 | sed "s/^/           /" \
+    || echo "           (none at all)"
+}
+
 expect_deck_soon() { # label expected
   local label="$1" want="$2" got=""
   for _ in $(seq 1 25); do
@@ -431,20 +457,24 @@ expect_deck_soon "the second card is written too" "$((base + 2))"
 type_card "Soak card three" "answer three" ""
 expect_deck_soon "and a third" "$((base + 3))"
 
+dup_since="$(date '+%Y-%m-%d %H:%M:%S')"
 type_card "Soak card one" "a different answer" ""
 sleep 2   # nothing to wait for — let a wrongly-accepted add land before denying it
 expect "a duplicate front is refused" "$((base + 3))" "$(deck_count)"
+expect_refusal "and refused for being a duplicate, not silently" "already in the deck" "$dup_since"
 
 wtype -k Escape; sleep 0.8                # back to review
 
 group "a deck it cannot parse is left alone"
 printf '{ this is not json' > "$DECK"
 before_broken="$(md5sum "$DECK" | cut -d" " -f1)"
+broken_since="$(date '+%Y-%m-%d %H:%M:%S')"
 wtype "a"; sleep 1.2
 type_card "Should not be written" "nope" ""
 sleep 2   # same: give a wrongly-accepted write time to happen
 after_broken="$(md5sum "$DECK" | cut -d" " -f1)"
 expect "the unparseable deck is untouched" "$before_broken" "$after_broken"
+expect_refusal "and refused for not parsing, not silently" "not valid JSON" "$broken_since"
 wtype -k Escape; sleep 0.8
 cp "$DECK_BACKUP" "$DECK"; sleep 0.5
 wtype "r"; sleep 1.5                      # reload the restored deck

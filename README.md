@@ -466,11 +466,18 @@ this plugin has shipped fails it.
 
 It covers repeated saves, undo, the two surfaces not erasing each other,
 adding several cards in a row, refusing a duplicate front, refusing an
-unparseable deck and recovering afterwards, touring the views without breaking
-review, and a configured setting reaching both surfaces rather than only the
-one the shell hands its entry to. It also scans the shell's log, since a view
-can render and still throw on every binding without any file-based assertion
-noticing.
+unparseable deck and recovering afterwards, a card lapsing its way to a leech
+and being restored, touring the views without breaking review, and a configured
+setting reaching both surfaces rather than only the one the shell hands its
+entry to. It also scans the shell's log, since a view can render and still
+throw on every binding without any file-based assertion noticing.
+
+A refusal is checked by its stated reason and not only by the deck failing to
+change. "The file did not change" is satisfied just as well by an add that
+never happened, which is not a hypothetical: an earlier version of this script
+counted a different file than the plugin wrote to, and the two refusal
+assertions stayed green throughout. So every refusal is written to the log, and
+the soak asserts the reason it expected actually appeared.
 
 The deck, `shell.json` and your scheduling progress are backed up and restored
 on exit, including on an interrupt. The deck it uses is the one your settings
