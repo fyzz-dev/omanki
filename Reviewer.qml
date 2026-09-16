@@ -451,6 +451,26 @@ Item {
   // and any field this plugin knows nothing about are not.
   property var pendingCard: null
 
+  // Every refusal goes through here. A refused add is shown in the composer and
+  // then forgotten, which leaves nothing behind for a test to look at: from
+  // outside, a card correctly refused and an add that quietly did nothing are
+  // the same event - the deck simply did not change. That ambiguity is not
+  // hypothetical. The soak's two refusal assertions are both of the form "the
+  // file did not change", and they sat green through a whole session in which
+  // adds were going to a different file entirely.
+  //
+  // So the reason is written to the log as well as to the screen. It is also
+  // the only trace a user has after the composer clears.
+  //
+  // The reason only, never the card: these strings are fixed messages from
+  // appendCard, and a front typed into a flashcard has no business in the
+  // journal.
+  function refuseAdd(reason) {
+    root.addError = reason
+    root.adding = false
+    console.log("omanki: add refused: " + reason)
+  }
+
   function addCard(front, back, tags) {
     if (root.adding) return
     root.addError = ""
@@ -471,8 +491,7 @@ Item {
 
         var result = Anki.appendCard(text, card.front, card.back, card.tags)
         if (result.error) {
-          root.addError = result.error
-          root.adding = false
+          root.refuseAdd(result.error)
           return
         }
 
@@ -496,7 +515,7 @@ Item {
     onExited: function(code) {
       root.adding = false
       if (code !== 0) {
-        root.addError = "Could not write the deck (" + code + ")"
+        root.refuseAdd("Could not write the deck (" + code + ")")
         return
       }
       // Re-read so the new card joins the session it was written for.
