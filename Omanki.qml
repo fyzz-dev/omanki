@@ -345,6 +345,7 @@ Item {
             textFormat: Text.PlainText
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
             visible: root.mode === "review"
             // The leech notice replaces the hints rather than crowding in
             // beside them: a card has just been taken out of the rotation, and
@@ -364,6 +365,7 @@ Item {
             textFormat: Text.PlainText
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
             visible: root.mode === "stats"
             text: (root.restoreNotice ? root.restoreNotice + "  ·  " : "")
                 + "s back to review"

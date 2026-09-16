@@ -190,6 +190,12 @@ Panel {
           textFormat: Text.PlainText
           width: parent.width
           horizontalAlignment: Text.AlignHCenter
+          // The hints are longer than the panel is wide once undo is offered.
+          // A width alone does not contain a Text - without this it is drawn
+          // centred at its natural width and spills past both edges - and
+          // wrapping is right where eliding is not, since the part that would
+          // be dropped is a key the reader is being told about.
+          wrapMode: Text.Wrap
           // The bar panel has no statistics view to restore from, so it says
           // where the restoring lives rather than offering a key it does not
           // have. Saying nothing would leave a card gone with no account of it.

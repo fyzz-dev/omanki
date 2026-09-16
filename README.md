@@ -509,6 +509,8 @@ write, so a fixed sleep tests the machine's mood rather than the plugin.
 | `Anki.js` | Scheduling, deck parsing, settings, file I/O snippets. No QML types. |
 | `Reviewer.qml` | The session: deck, progress, queue, persistence, card face. |
 | `GradeButtons.qml` | The four priced grade buttons, shared by both surfaces. |
+| `CardComposer.qml` | The add-a-card form behind `a`, in the overlay only. |
+| `StatsView.qml` | The statistics behind `s`, including the leeches and the way back. |
 | `Panel.qml` | The bar widget and the panel chrome around the session. |
 | `Omanki.qml` | The fullscreen overlay chrome around the same session. |
 
