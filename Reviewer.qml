@@ -32,7 +32,16 @@ Item {
   // card out of the rotation or only marks it.
   property int leechThreshold: Anki.LEECH_THRESHOLD
   property bool leechSuspend: true
-  readonly property var leechOpts: ({
+
+  // How much of a lapsed card's interval survives the lapse, as a percentage.
+  // Anki's own default is 0; see LAPSE_PERCENT for why this one differs.
+  property int lapsePercent: Anki.LAPSE_PERCENT
+
+  // Everything a grade depends on beyond the card itself. Named for what it is
+  // rather than for the leeches it used to be, now that it carries the lapse
+  // share too.
+  readonly property var gradeOpts: ({
+    lapsePercent: root.lapsePercent,
     leechThreshold: root.leechThreshold,
     leechSuspend: root.leechSuspend
   })
@@ -201,7 +210,7 @@ Item {
     // interval spreads once — at the moment the answer is committed — and the
     // priced labels above, which grade the same card without a roll, keep
     // showing a number that does not move while you decide.
-    var after = Anki.grade(before, g, root.now, Math.random(), root.leechOpts)
+    var after = Anki.grade(before, g, root.now, Math.random(), root.gradeOpts)
 
     // Only on the answer that makes one. A card already marked stays marked,
     // and re-answering it must not announce the same thing again.

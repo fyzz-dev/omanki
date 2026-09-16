@@ -54,6 +54,8 @@ Item {
   readonly property int leechThreshold:
       Anki.sanePerDay(root.pluginSettings.leechThreshold, Anki.LEECH_THRESHOLD)
   readonly property bool leechSuspend: root.pluginSettings.leechSuspend !== false
+  readonly property int lapsePercent:
+      Anki.sanePerDay(root.pluginSettings.lapsePercent, Anki.LAPSE_PERCENT)
 
   // review | stats | add. The overlay is the surface with room for more than
   // one card, so it is the one that gets the other two.
@@ -292,6 +294,7 @@ Item {
             reviewsPerDay: root.reviewsPerDay
             leechThreshold: root.leechThreshold
             leechSuspend: root.leechSuspend
+            lapsePercent: root.lapsePercent
             tags: root.tags
             active: root.opened
             foreground: root.foreground

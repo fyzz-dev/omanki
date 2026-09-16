@@ -29,6 +29,7 @@ const EXPORTS = [
   "READ_SH", "WRITE_SH", "relativeToHome", "READ_LIMIT", "fuzzInterval", "hitReadLimit",
   "LEECH_THRESHOLD", "isLeechLapse", "leechConfig", "unsuspendAll",
   "daysLate", "constrainIvl", "HARD_MULTIPLIER", "EASY_BONUS",
+  "LAPSE_PERCENT", "lapseFactor",
 ]
 const G = {}
 new Function("exports", `${src}\nfor (const k of ${JSON.stringify(EXPORTS)}) exports[k] = eval(k)`)(G)
@@ -1173,6 +1174,62 @@ group("ease is applied after the interval is chosen")
   t("hard costs ease", h.ease === 2350)
   t("hard's interval is the flat multiplier, not the reduced factor",
     h.interval === 12 * G.DAY)
+}
+
+group("how much a lapse costs is a setting")
+{
+  const held = (ivl) => Object.assign(G.newState(),
+    { phase: "review", interval: ivl * G.DAY, ease: 2500, reps: 20, due: NOW })
+  const kept = (ivl, opts) => G.grade(held(ivl), "again", NOW, undefined, opts).interval / G.DAY
+
+  t("the default keeps half", kept(100) === 50)
+  t("and says so in one place", G.LAPSE_PERCENT === 50)
+
+  t("0% is Anki's default and sends the card back to a day", kept(100, { lapsePercent: 0 }) === 1)
+  t("100% keeps the whole interval", kept(100, { lapsePercent: 100 }) === 100)
+  t("70% keeps seven tenths", kept(100, { lapsePercent: 70 }) === 70)
+
+  // The floor is clampInterval's, which is also Anki's pairing of a 0% new
+  // interval with a one-day minimum.
+  t("a short interval cannot be reduced below a day",
+    kept(1, { lapsePercent: 0 }) === 1 && kept(2, { lapsePercent: 10 }) === 1)
+
+  // Out of range is meaningless in one direction and perverse in the other:
+  // forgetting a card must never lengthen it.
+  t("a negative share is clamped to zero", kept(100, { lapsePercent: -50 }) === 1)
+  t("a share above 100 cannot lengthen the card", kept(100, { lapsePercent: 500 }) === 100)
+  t("a nonsense share falls back to the default",
+    kept(100, { lapsePercent: "x" }) === 50 && kept(100, {}) === 50 && kept(100) === 50)
+
+  t("the fraction itself is clamped",
+    G.lapseFactor({ lapsePercent: 0 }) === 0 &&
+    G.lapseFactor({ lapsePercent: 100 }) === 1 &&
+    G.lapseFactor({ lapsePercent: 250 }) === 1 &&
+    G.lapseFactor(null) === 0.5)
+
+  // The setting changes only the interval carried through relearning. The
+  // lapse itself, the ease it costs, and the step it lands on are unchanged.
+  for (const pct of [0, 50, 100]) {
+    const r = G.grade(held(100), "again", NOW, undefined, { lapsePercent: pct })
+    t(`at ${pct}% the lapse still costs ease and relearns`,
+      r.ease === 2300 && r.lapses === 1 && r.phase === "relearning" &&
+      r.due === NOW + 10 * G.MINUTE)
+  }
+
+  // Which means the priced Again label is the same at every setting: it shows
+  // the relearning step, not the interval waiting on the other side of it.
+  t("the Again label does not move with the setting",
+    G.previewIntervals(held(100), NOW).again === "10m")
+
+  // Leaving relearning restores whatever the lapse kept, so the setting is
+  // what decides where the card lands when it comes back.
+  const after = (pct) => {
+    const lapsed = G.grade(held(100), "again", NOW, undefined, { lapsePercent: pct })
+    return G.grade(lapsed, "good", NOW + 600).interval / G.DAY
+  }
+  t("leaving relearning restores the kept interval", after(50) === 50)
+  t("at 0% the card comes back at a day", after(0) === 1)
+  t("at 100% the card comes back where it was", after(100) === 100)
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

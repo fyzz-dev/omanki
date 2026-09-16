@@ -223,6 +223,7 @@ hot-reloads on save.
 | `showCount` | `true` | Show the waiting count next to the bar glyph. |
 | `tags` | *(none)* | Restrict the session to cards carrying any of these tags. |
 | `reviewsPerDay` | `0` | Cap how many due cards a day serves. `0` means no cap. |
+| `lapsePercent` | `50` | How much of a forgotten card's interval survives, as a percentage. `0` is Anki's default. |
 | `leechThreshold` | `8` | Lapses before a card counts as a leech. `0` turns leeches off. |
 | `leechSuspend` | `true` | Take a leech out of the rotation rather than only marking it. |
 
@@ -302,10 +303,25 @@ interval on each button is the unspread one and holds still while you decide.
 Lapses and leaving relearning are not spread: those restore an interval the
 card already had rather than computing a new one.
 
-*Again* on a review card is a **lapse**: it costs 200 ease, halves the
-interval, and sends the card through a 10-minute relearning step. Coming out
-of relearning restores that halved interval rather than starting over at a
-day, so one slip does not erase months of spacing.
+*Again* on a review card is a **lapse**: it costs 200 ease, cuts the interval,
+and sends the card through a 10-minute relearning step. Coming out of
+relearning restores whatever the lapse left rather than starting over, so the
+cut is what decides where a forgotten card lands when it comes back.
+
+How deep that cut goes is `lapsePercent`, and it defaults to **50** — half the
+interval survives. Anki calls the same setting *New interval* and defaults it
+to **0**, which sends a forgotten card back to a single day however long it had
+been holding. Both are defensible and the disagreement is genuine: at 0 the
+card was forgotten, so the spacing that produced the forgetting has been
+disproved; at 50 one slip on a card held for months is weak evidence against
+months of successful recall, and starting over throws away the rest. Set it to
+`0` for Anki's behaviour.
+
+The result is floored at one day whatever the percentage, which is Anki's
+minimum interval — a setting it also exposes and this one does not, a day being
+the only value that has ever made sense for it. A lapse always costs the same
+200 ease and always relearns, at every percentage; only the interval waiting on
+the other side changes.
 
 A card that keeps being forgotten becomes a **leech**. Past some number of
 lapses the card is the problem rather than your memory — the question is
@@ -443,10 +459,10 @@ node tests/scheduler.test.mjs
 ```
 
 That covers the learning steps, interval growth and spreading, the credit for
-answering late and the order the three passing grades keep, lapses and
-recovery, leeches and restoring them, the clamps, deck parsing, an oversized
-deck being reported as such, queue order, the 4am rollover, document merging,
-and the hardening on both file-I/O snippets.
+answering late and the order the three passing grades keep, lapses at every
+setting and the recovery from them, leeches and restoring them, the clamps,
+deck parsing, an oversized deck being reported as such, queue order, the 4am
+rollover, document merging, and the hardening on both file-I/O snippets.
 
 Those tests are pure: they know nothing about processes, files, or two
 surfaces being open at once. Every bug this plugin has actually shipped lived
