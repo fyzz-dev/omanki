@@ -7,7 +7,22 @@ import "Anki.js" as Anki
 // coming, and whether the scheduling is working. Everything shown is derived
 // from the cards themselves — the plugin keeps no review log, so nothing here
 // depends on history it does not have.
-Column {
+//
+// In tabs, the same four the bar panel uses, for a reason the panel did not
+// have: the page fitted here, but fitting is not the same as reading. Six
+// figures at one weight, a composition bar, a week of forecast and a paragraph
+// of prose all arriving together gave the eye nowhere to land — everything on
+// it was equally loud, so it read as a table rather than an answer.
+//
+// So the split is by question. What is the deck (DECK), what is coming (DUE),
+// how did today go (TODAY), what has gone wrong (LEECHES). Each tab then gets
+// the room this surface always had, spent on one thing instead of four.
+//
+// Same tab names and same order as PanelStats, because the two surfaces should
+// not be two things to learn. What differs is what a tab may hold: at this
+// width each one can carry a legend, a taller plot and a sentence, where the
+// panel's has to make do with a caption.
+Item {
   id: root
 
   property var stats: null
@@ -16,290 +31,357 @@ Column {
   property color urgent: Color.urgent
   property string fontFamily: Style.font.family
 
-  spacing: Style.spacing.lg
+  // Which tab is showing. Owned by Omanki.qml, which also owns the strip that
+  // changes it — the strip rides on the section header, well above this, so one
+  // property read by both beats a value bound in two directions between them.
+  property int tab: 0
 
   readonly property int seen: root.stats ? root.stats.seen : 0
   readonly property int total: root.stats ? root.stats.total : 0
   readonly property int leeches: root.stats ? (root.stats.leeches || 0) : 0
   readonly property int suspended: root.stats ? (root.stats.suspended || 0) : 0
 
-  // ------------------------------------------------------------- composition
-  // One bar rather than four numbers: the shape of a deck — how much is still
-  // unseen, how much is still shaky — reads faster than its arithmetic.
-  Column {
-    width: parent.width
-    spacing: Style.spacing.sm
+  // The leech tab appears only once there is a leech. A deck with none is the
+  // ordinary case and should not carry a tab explaining a thing that has not
+  // happened.
+  readonly property var tabs: root.leeches > 0
+      ? ["DECK", "DUE", "TODAY", "LEECHES"]
+      : ["DECK", "DUE", "TODAY"]
 
-    Row {
+  readonly property int count: root.tabs.length
+
+  implicitHeight: body.height
+
+  // One height for every tab, taken from the tallest. The card is centred on
+  // the screen and sized to its content, so a tab that is shorter than its
+  // neighbour would move the whole surface — and the grade buttons with it —
+  // every time an arrow key is pressed.
+  Item {
+    id: body
+    width: parent.width
+    height: Math.max(deckTab.implicitHeight, dueTab.implicitHeight,
+                     todayTab.implicitHeight, leechTab.implicitHeight)
+
+    // ------------------------------------------------------------- deck
+    //
+    // The shape of the deck reads faster than its arithmetic, which is why this
+    // is a bar and the numbers under it are a legend.
+    Column {
+      id: deckTab
       width: parent.width
       spacing: Style.spacing.md
+      visible: root.tab === 0
 
+      Row {
+        width: parent.width
+        spacing: Style.spacing.md
+
+        Text {
+          id: deckCount
+          textFormat: Text.PlainText
+          text: root.total + (root.total === 1 ? " card" : " cards")
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.subtitle
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          anchors.baseline: deckCount.baseline
+          text: root.total ? Anki.percent(root.seen / root.total) + " seen" : ""
+          color: root.foreground
+          opacity: 0.5
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+      }
+
+      Row {
+        width: parent.width
+        height: Style.space(10)
+        spacing: Math.max(1, Style.space(1))
+
+        Repeater {
+          model: [
+            { key: "mature",   tone: root.accent,     alpha: 1.00 },
+            { key: "young",    tone: root.accent,     alpha: 0.55 },
+            { key: "learning", tone: root.urgent,     alpha: 0.85 },
+            { key: "fresh",    tone: root.foreground, alpha: 0.18 }
+          ]
+
+          Rectangle {
+            id: seg
+            required property var modelData
+            readonly property int n: root.stats ? (root.stats[seg.modelData.key] || 0) : 0
+            height: parent.height
+            // Widths are shares of the whole deck, less the hairline gaps.
+            width: root.total > 0
+                ? Math.max(seg.n > 0 ? Style.space(2) : 0,
+                           (parent.width - Style.space(3)) * seg.n / root.total)
+                : 0
+            visible: seg.n > 0
+            radius: Style.cornerRadius > 0 ? height / 2 : 0
+            color: Util.alpha(seg.modelData.tone, seg.modelData.alpha)
+          }
+        }
+      }
+
+      // One row rather than the panel's two-by-two: there is width here for
+      // four, and four across keeps the legend in the same reading order as the
+      // bar it describes.
+      Row {
+        width: parent.width
+        spacing: Style.spacing.lg
+
+        Repeater {
+          model: [
+            { label: "mature",   key: "mature",   tone: root.accent,     alpha: 1.00 },
+            { label: "young",    key: "young",    tone: root.accent,     alpha: 0.55 },
+            { label: "learning", key: "learning", tone: root.urgent,     alpha: 0.85 },
+            { label: "unseen",   key: "fresh",    tone: root.foreground, alpha: 0.18 }
+          ]
+
+          Row {
+            required property var modelData
+            spacing: Style.spacing.xs
+
+            // A swatch, so the legend names the bar rather than merely sitting
+            // under it. The panel has no room for these; this does.
+            Rectangle {
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(8)
+              height: Style.space(8)
+              radius: Style.cornerRadius > 0 ? width / 2 : 0
+              color: Util.alpha(modelData.tone, modelData.alpha)
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              text: (root.stats ? (root.stats[modelData.key] || 0) : 0) + " " + modelData.label
+              color: root.foreground
+              opacity: 0.55
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+        }
+      }
+    }
+
+    // -------------------------------------------------------------- due
+    Column {
+      id: dueTab
+      width: parent.width
+      spacing: Style.spacing.md
+      visible: root.tab === 1
+
+      // The tab is already called DUE, so this says how many rather than
+      // repeating the word as a heading.
       Text {
         textFormat: Text.PlainText
-        text: root.total + " cards"
+        text: {
+          if (!root.stats || !root.stats.forecast) return ""
+          var n = 0
+          for (var i = 0; i < root.stats.forecast.length; i++) n += root.stats.forecast[i]
+          return n + (n === 1 ? " card" : " cards") + " over the next week"
+        }
         color: root.foreground
+        opacity: 0.55
         font.family: root.fontFamily
-        font.pixelSize: Style.font.subtitle
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Row {
+        width: parent.width
+        height: Style.space(76)
+        spacing: Style.spacing.sm
+
+        Repeater {
+          model: 7
+
+          Column {
+            id: day
+            required property int index
+
+            readonly property int n:
+                (root.stats && root.stats.forecast) ? (root.stats.forecast[day.index] || 0) : 0
+
+            // Bars are scaled against the busiest day rather than an absolute
+            // count, so a quiet week still has shape instead of seven stubs.
+            readonly property int peak: {
+              if (!root.stats || !root.stats.forecast) return 1
+              var max = 1
+              for (var i = 0; i < root.stats.forecast.length; i++)
+                max = Math.max(max, root.stats.forecast[i])
+              return max
+            }
+
+            width: (parent.width - Style.spacing.sm * 6) / 7
+            spacing: Style.spacing.xxs
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              horizontalAlignment: Text.AlignHCenter
+              text: day.n > 0 ? String(day.n) : ""
+              color: root.foreground
+              opacity: 0.55
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            Item {
+              id: plot
+              width: parent.width
+              height: Style.space(44)
+
+              Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: day.n > 0
+                    ? Math.max(Style.space(3), plot.height * day.n / day.peak)
+                    : Math.max(1, Style.space(1))
+                radius: Style.cornerRadius > 0 ? Style.space(2) : 0
+                color: day.n > 0
+                    ? Util.alpha(root.accent, day.index === 0 ? 1.0 : 0.45)
+                    : Util.alpha(root.foreground, 0.12)
+              }
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              horizontalAlignment: Text.AlignHCenter
+              text: day.index === 0 ? "now" : "+" + day.index
+              color: root.foreground
+              opacity: 0.35
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+      }
+    }
+
+    // ------------------------------------------------------------ today
+    //
+    // One figure with its breakdown, rather than six figures at one weight.
+    // `answeredToday` is `reviewsToday + introducedToday` by construction — a
+    // card whose firstDay is today was answered today — so showing all three as
+    // peers was three numbers carrying two facts, and the grid of them was the
+    // densest thing on the old page.
+    Column {
+      id: todayTab
+      width: parent.width
+      spacing: Style.spacing.md
+      visible: root.tab === 2
+
+      Row {
+        width: parent.width
+        spacing: Style.spacing.md
+
+        Text {
+          id: answered
+          textFormat: Text.PlainText
+          text: root.stats ? String(root.stats.answeredToday) : "0"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.heading
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          anchors.baseline: answered.baseline
+          text: (root.stats && root.stats.answeredToday === 1) ? "card answered today" : "cards answered today"
+          color: root.foreground
+          opacity: 0.5
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
       }
 
       Text {
         textFormat: Text.PlainText
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.total ? Anki.percent(root.seen / root.total) + " seen" : ""
+        width: parent.width
+        wrapMode: Text.Wrap
+        text: root.stats
+            ? root.stats.reviewsToday + (root.stats.reviewsToday === 1 ? " review" : " reviews")
+              + "  ·  " + root.stats.introducedToday + " new"
+            : ""
+        color: root.foreground
+        opacity: 0.55
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      PanelSeparator {
+        width: parent.width
+        foreground: root.foreground
+      }
+
+      // Deck-wide rather than today's, but they are the numbers that answer
+      // "is this working", which is the question the rest of this tab asks.
+      // One line, the way the panel says it: at headline size they competed
+      // with the figure above for attention and won it on nothing but size.
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        wrapMode: Text.Wrap
+        text: root.stats
+            ? "ease " + root.stats.ease.toFixed(2)
+              + "  ·  " + Anki.percent(root.stats.retention) + " never relearned"
+              + "  ·  " + root.stats.lapsed + (root.stats.lapsed === 1 ? " lapsed card" : " lapsed cards")
+            : ""
         color: root.foreground
         opacity: 0.5
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall
       }
-    }
 
-    Row {
-      width: parent.width
-      height: Style.space(10)
-      spacing: Math.max(1, Style.space(1))
-
-      Repeater {
-        model: [
-          { key: "mature",   tone: root.accent,     alpha: 1.00 },
-          { key: "young",    tone: root.accent,     alpha: 0.55 },
-          { key: "learning", tone: root.urgent,     alpha: 0.85 },
-          { key: "fresh",    tone: root.foreground, alpha: 0.18 }
-        ]
-
-        Rectangle {
-          id: seg
-          required property var modelData
-          readonly property int count: root.stats ? (root.stats[seg.modelData.key] || 0) : 0
-          height: parent.height
-          // Widths are shares of the whole deck, less the hairline gaps.
-          width: root.total > 0
-              ? Math.max(seg.count > 0 ? Style.space(2) : 0,
-                         (parent.width - Style.space(3)) * seg.count / root.total)
-              : 0
-          visible: seg.count > 0
-          radius: Style.cornerRadius > 0 ? height / 2 : 0
-          color: Util.alpha(seg.modelData.tone, seg.modelData.alpha)
-        }
+      // Retention has no review log behind it, and saying so is cheaper than
+      // letting someone read it as Anki's number.
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        wrapMode: Text.Wrap
+        text: "A lifetime figure per card, not a rolling window."
+        color: root.foreground
+        opacity: 0.3
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
       }
     }
 
-    Row {
+    // ---------------------------------------------------------- leeches
+    //
+    // This is also the only place a suspended card can be found again: there is
+    // no card browser to go looking in, so the count and the way back have to
+    // be in the same view, or suspending would be a one-way door.
+    Column {
+      id: leechTab
       width: parent.width
       spacing: Style.spacing.md
+      visible: root.tab === 3 && root.leeches > 0
 
-      Repeater {
-        model: [
-          { label: "mature",   key: "mature" },
-          { label: "young",    key: "young" },
-          { label: "learning", key: "learning" },
-          { label: "unseen",   key: "fresh" }
-        ]
-
-        Text {
-          textFormat: Text.PlainText
-          required property var modelData
-          text: (root.stats ? (root.stats[modelData.key] || 0) : 0) + " " + modelData.label
-          color: root.foreground
-          opacity: 0.5
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        wrapMode: Text.Wrap
+        text: {
+          var n = root.leeches
+          var s = root.suspended
+          var head = n === 1
+              ? "1 card has lapsed enough to count as a leech"
+              : n + " cards have lapsed enough to count as a leech"
+          if (s === 0) return head + ". None are suspended."
+          if (s === n) return head + (n === 1 ? ", and it is suspended." : ", and all of them are suspended.")
+          return head + ", and " + s + " of them " + (s === 1 ? "is" : "are") + " suspended."
         }
+        color: root.foreground
+        opacity: 0.6
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
       }
     }
-  }
-
-  PanelSeparator {
-    width: parent.width
-    foreground: root.foreground
-  }
-
-  // ---------------------------------------------------------------- forecast
-  Column {
-    width: parent.width
-    spacing: Style.spacing.sm
-
-    PanelSectionHeader {
-      textFormat: Text.PlainText
-      width: parent.width
-      text: "DUE OVER THE NEXT WEEK"
-      foreground: root.foreground
-      fontFamily: root.fontFamily
-    }
-
-    Row {
-      width: parent.width
-      height: Style.space(56)
-      spacing: Style.spacing.sm
-
-      Repeater {
-        model: 7
-
-        Column {
-          id: day
-          required property int index
-
-          readonly property int count:
-              (root.stats && root.stats.forecast) ? (root.stats.forecast[day.index] || 0) : 0
-
-          // Bars are scaled against the busiest day rather than an absolute
-          // count, so a quiet week still has shape instead of seven stubs.
-          readonly property int peak: {
-            if (!root.stats || !root.stats.forecast) return 1
-            var max = 1
-            for (var i = 0; i < root.stats.forecast.length; i++)
-              max = Math.max(max, root.stats.forecast[i])
-            return max
-          }
-
-          width: (parent.width - Style.spacing.sm * 6) / 7
-          spacing: Style.spacing.xxs
-
-          Item {
-            id: plot
-            width: parent.width
-            height: Style.space(38)
-
-            Rectangle {
-              anchors.bottom: parent.bottom
-              width: parent.width
-              height: day.count > 0
-                  ? Math.max(Style.space(3), plot.height * day.count / day.peak)
-                  : Math.max(1, Style.space(1))
-              radius: Style.cornerRadius > 0 ? Style.space(2) : 0
-              color: day.count > 0
-                  ? Util.alpha(root.accent, day.index === 0 ? 1.0 : 0.45)
-                  : Util.alpha(root.foreground, 0.12)
-            }
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            text: day.count > 0 ? String(day.count) : ""
-            color: root.foreground
-            opacity: 0.55
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            text: day.index === 0 ? "now" : "+" + day.index
-            color: root.foreground
-            opacity: 0.35
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-        }
-      }
-    }
-  }
-
-  PanelSeparator {
-    width: parent.width
-    foreground: root.foreground
-  }
-
-  // ------------------------------------------------------------------ figures
-  Grid {
-    width: parent.width
-    columns: 3
-    columnSpacing: Style.spacing.lg
-    rowSpacing: Style.spacing.md
-
-    Repeater {
-      model: [
-        { label: "ANSWERED TODAY", value: root.stats ? String(root.stats.answeredToday) : "0" },
-        { label: "NEW TODAY",      value: root.stats ? String(root.stats.introducedToday) : "0" },
-        { label: "REVIEWS TODAY",  value: root.stats ? String(root.stats.reviewsToday) : "0" },
-        { label: "AVERAGE EASE",   value: root.stats ? root.stats.ease.toFixed(2) : "0" },
-        { label: "LAPSED CARDS",   value: root.stats ? String(root.stats.lapsed) : "0" },
-        { label: "RETENTION",      value: root.stats ? Anki.percent(root.stats.retention) : "0%" }
-      ]
-
-      Column {
-        required property var modelData
-        spacing: Style.spacing.xxs
-
-        Text {
-          textFormat: Text.PlainText
-          text: modelData.label
-          color: root.foreground
-          opacity: 0.45
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-
-        Text {
-          textFormat: Text.PlainText
-          text: modelData.value
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.title
-        }
-      }
-    }
-  }
-
-  // --------------------------------------------------------------- leeches
-  // Only when there are any. A deck with no leeches is the ordinary case and
-  // should not carry a row of zeroes explaining a thing that has not happened.
-  //
-  // This is also the only place a suspended card can be found again: there is
-  // no card browser to go looking in, so the count and the way back have to be
-  // in the same sentence, or suspending would be a one-way door.
-  Column {
-    width: parent.width
-    spacing: Style.spacing.sm
-    visible: root.leeches > 0
-
-    PanelSeparator {
-      width: parent.width
-      foreground: root.foreground
-    }
-
-    PanelSectionHeader {
-      textFormat: Text.PlainText
-      width: parent.width
-      text: "LEECHES"
-      foreground: root.foreground
-      fontFamily: root.fontFamily
-    }
-
-    Text {
-      textFormat: Text.PlainText
-      width: parent.width
-      wrapMode: Text.Wrap
-      text: {
-        var n = root.leeches
-        var s = root.suspended
-        var head = n === 1
-            ? "1 card has lapsed enough to count as a leech"
-            : n + " cards have lapsed enough to count as a leech"
-        if (s === 0) return head + ". None are suspended."
-        if (s === n) return head + (n === 1 ? ", and it is suspended." : ", and all of them are suspended.")
-        return head + ", and " + s + " of them " + (s === 1 ? "is" : "are") + " suspended."
-      }
-      color: root.foreground
-      opacity: 0.55
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
-    }
-  }
-
-  // Retention has no review log behind it, and saying so is cheaper than
-  // letting someone read it as Anki's number.
-  Text {
-    textFormat: Text.PlainText
-    width: parent.width
-    wrapMode: Text.Wrap
-    text: "Retention is a lifetime figure per card — answers that never had to be relearned — not a rolling window."
-    color: root.foreground
-    opacity: 0.35
-    font.family: root.fontFamily
-    font.pixelSize: Style.font.caption
   }
 }

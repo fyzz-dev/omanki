@@ -80,6 +80,29 @@ Item {
     restoreNoticeTimer.restart()
   }
 
+  // Which statistics tab is showing. Held here rather than in StatsView for
+  // the same reason the panel holds its own: the strip that changes it rides
+  // on the section header while the body it drives is further down the column,
+  // so one property both of them read beats a value bound in two directions
+  // between two siblings.
+  property int statsTab: 0
+
+  // Wraps, so the arrows walk the strip in a circle rather than stopping at
+  // the ends and leaving the reader to work out which end they are on.
+  function stepTab(delta) {
+    var n = statsView.count
+    if (n > 0) root.statsTab = ((root.statsTab + delta) % n + n) % n
+  }
+
+  // The leech tab appears and disappears with the leeches, and restoring the
+  // last one must not leave the view pointing past the end of the strip.
+  Connections {
+    target: statsView
+    function onCountChanged() {
+      if (root.statsTab >= statsView.count) root.statsTab = Math.max(0, statsView.count - 1)
+    }
+  }
+
   // Wide enough to read a sentence without becoming a wall of text, and capped
   // so it does not stretch across an ultrawide.
   readonly property int cardWidth: Math.min(Style.space(620), Math.round(panel.width * 0.62))
@@ -172,6 +195,16 @@ Item {
               // someone wanted out of the stats would be a rude surprise.
               if (root.mode !== "review") { root.showReview(); event.accepted = true; return }
               root.dismiss(); event.accepted = true; return
+            case Qt.Key_Left:
+            case Qt.Key_Right:
+              // Only in the statistics. The composer is a form, and arrows in
+              // a form move the caret — falling through without accepting is
+              // what lets them reach it.
+              if (root.mode === "stats") {
+                root.stepTab(event.key === Qt.Key_Right ? 1 : -1)
+                event.accepted = true
+              }
+              return
             case Qt.Key_Space:
             case Qt.Key_Return:
             case Qt.Key_Enter:
@@ -274,14 +307,38 @@ Item {
             foreground: root.foreground
           }
 
-          PanelSectionHeader {
-            textFormat: Text.PlainText
+          // The section header and, in the statistics, the tab strip on the
+          // end of the same line. Stacking the strip underneath put two rows of
+          // small-caps text against each other, which crowded both — the same
+          // thing that made it ride the header in the bar panel.
+          Item {
             width: parent.width
-            text: root.mode === "stats" ? "STATISTICS"
-                : root.mode === "add" ? "ADD A CARD"
-                : Anki.sectionLabel(reviewer.phase, reviewer.currentState, root.tags)
-            foreground: root.foreground
-            fontFamily: root.fontFamily
+            height: Math.max(sectionHeader.implicitHeight, tabStrip.height)
+
+            PanelSectionHeader {
+              id: sectionHeader
+              textFormat: Text.PlainText
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.mode === "stats" ? "STATISTICS"
+                  : root.mode === "add" ? "ADD A CARD"
+                  : Anki.sectionLabel(reviewer.phase, reviewer.currentState, root.tags)
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            StatsTabs {
+              id: tabStrip
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              visible: root.mode === "stats"
+              tabs: statsView.tabs
+              current: root.statsTab
+              foreground: root.foreground
+              accent: Color.accent
+              fontFamily: root.fontFamily
+              onSelected: function(i) { root.statsTab = i }
+            }
           }
 
           Reviewer {
@@ -320,9 +377,11 @@ Item {
           }
 
           StatsView {
+            id: statsView
             width: parent.width
             visible: root.mode === "stats"
             stats: reviewer.deckStats
+            tab: root.statsTab
             foreground: root.foreground
             accent: Color.accent
             urgent: Color.urgent
@@ -368,7 +427,7 @@ Item {
             wrapMode: Text.Wrap
             visible: root.mode === "stats"
             text: (root.restoreNotice ? root.restoreNotice + "  ·  " : "")
-                + "s back to review"
+                + "← → tabs  ·  s back to review"
                 + (reviewer.deckStats && reviewer.deckStats.suspended > 0 ? "  ·  l restore leeches" : "")
                 + "  ·  a add a card  ·  esc close"
             color: root.foreground

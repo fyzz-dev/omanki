@@ -112,7 +112,8 @@ same restart clears it.
 | `1` `2` `3` `4` | Again / Hard / Good / Easy |
 | `u` | Undo the last answer |
 | `s` | Statistics |
-| `←` `→` or `h` `l` | Move between statistics tabs (bar panel) |
+| `←` `→` | Move between statistics tabs |
+| `h` `l` | Move between statistics tabs (bar panel only) |
 | `l` | Restore suspended leeches (overlay) |
 | `a` | Add a card (overlay only) |
 | `r` | Reload the deck from disk |
@@ -152,28 +153,38 @@ been answering the same deck.
 
 `s` on either surface, `a` in the overlay.
 
-The two statistics views show the same numbers and are laid out for the room
-they have. The overlay is a whole screen, so it puts the deck's composition,
-the week ahead, six figures and the leeches on one page. The panel is about a
-card wide, where that same page would be a column of squeezed rows saying
-everything badly — so it uses **tabs**: `DECK`, `DUE`, `TODAY`, and `LEECHES`
-once there is a leech to show. One thing at a time, each sized to the space
-actually there, and the strip says what else there is, which a scrolling column
-never does. Walk them with `←` and `→`, or click.
+Both surfaces use the same **tabs** — `DECK`, `DUE`, `TODAY`, and `LEECHES`
+once there is a leech to show — walked with `←` and `→`, or clicked. Same names
+and same order on both, because two surfaces should not be two things to learn.
 
-The strip rides on the end of the `STATISTICS` line rather than sitting under
-it. A row of small-caps tabs directly below the small-caps word crowded both and
-spent a row of a panel that has few to spare.
+They arrived there for different reasons. The panel is about a card wide, where
+one page would be a column of squeezed rows saying everything badly. The
+overlay's page *fitted* — but fitting is not reading: a composition bar, a week
+of forecast, six figures at one weight and a paragraph of prose all arriving at
+once gave the eye nowhere to land, and it read as a table rather than an
+answer. Splitting it by question — what is the deck, what is coming, how did
+today go, what has gone wrong — spends the room this surface always had on one
+thing instead of four.
+
+What differs is what a tab may hold. At the overlay's width each one carries a
+legend, a taller plot and a full sentence, where the panel's has to make do
+with a caption.
+
+On both surfaces the strip rides on the end of the `STATISTICS` line rather
+than sitting under it. A row of small-caps tabs directly below the small-caps
+word crowded both, and in the panel it also spent a row there are few of.
 
 Both read the same numbers, so there is one calculation behind two
 presentations rather than two of either.
 
 **Statistics** shows the deck's composition — mature, young, learning, new —
-what falls due over the next seven days, and today's figures. Everything is
-derived from the cards themselves; the plugin keeps no review log, so
-*retention* is a lifetime figure per card (answers that never had to be
-relearned) rather than Anki's rolling window, and the view says so rather than
-letting the number be misread.
+what falls due over the next seven days, and today's figures. Today leads with
+the one number and gives its parts underneath: `answered` is `reviews + new` by
+construction, so showing all three as peers was three numbers carrying two
+facts. Everything is derived from the cards themselves; the plugin keeps no
+review log, so *retention* is a lifetime figure per card (answers that never
+had to be relearned) rather than Anki's rolling window, and the view says so
+rather than letting the number be misread.
 
 **Leeches** appear in both, but only once there are any — a deck without them
 says nothing about them, and in the panel the tab itself stays away. You get
