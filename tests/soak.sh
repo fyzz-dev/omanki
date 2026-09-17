@@ -565,6 +565,31 @@ else
   overlay_toggle
 fi
 
+group "the overlay's statistics open in tabs, and leave the cards where they were"
+# The overlay's statistics are tabbed too now, for a reason the panel's split
+# did not have: the single page fitted, but fitting is not reading - six
+# figures at one weight, a composition bar, a week of forecast and a paragraph
+# of prose all arriving together read as a table rather than an answer.
+#
+# Same walk as the panel group below. A view that throws on every binding still
+# "opens", so touring the strip and then answering a card is what actually says
+# the bindings hold; the log scan at the end of this file catches the throwing.
+#
+# The overlay walks with the arrows only. `l` restores leeches here, so it
+# cannot also mean "next tab" the way it does in the panel, where the shell
+# claims h/l before the panel ever sees them.
+reset
+overlay_toggle
+key "s"
+wtype -k Right; sleep 0.5
+wtype -k Right; sleep 0.5
+wtype -k Right; sleep 0.5    # wraps back round to the first
+ok "the overlay's statistics tabs were walked"
+key "s"
+reveal_and_grade 3
+expect_soon "the overlay still reviews after touring its tabs" 1 answered
+overlay_toggle
+
 group "the panel's statistics open, and leave the cards where they were"
 # The panel grew its own statistics, laid out in tabs rather than as the single
 # column the overlay can afford. A view that throws on every binding still
