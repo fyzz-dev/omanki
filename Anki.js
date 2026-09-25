@@ -449,6 +449,13 @@ function dayKey(now) {
   return d.getFullYear() + "-" + (month < 10 ? "0" : "") + month + "-" + (day < 10 ? "0" : "") + day
 }
 
+// Which study day of the week this instant falls in — 0 (Sunday) through 6
+// (Saturday), the same 4am rollover applied. Used only to line a heatmap's
+// columns up on real weeks, the way GitHub's does.
+function dayOfWeek(now) {
+  return new Date((now - ROLLOVER_HOUR * HOUR) * 1000).getDay()
+}
+
 // --------------------------------------------------------------------- deck
 
 // Cards are identified by a hash of their front, not by position, so
@@ -731,8 +738,15 @@ function appendCard(raw, front, back, tags) {
 }
 
 function emptyProgress() {
-  return { reviews: {} }
+  return { reviews: {}, activity: {} }
 }
+
+// A day only ever gets one entry here, written once by freezeActivity and
+// never touched again — see there for why. A number past this many days old
+// is dropped on read rather than carried forever: nothing reads it once a
+// heatmap can no longer reach that far back, and dropping it here means an
+// old, heavily-used deck's progress file does not grow without bound.
+var ACTIVITY_MAX_DAYS = 371
 
 // Documents written before the day tally became derived carry `day` and
 // `introduced` fields; they are simply ignored, which costs at most one day's
@@ -747,6 +761,13 @@ function parseProgress(raw) {
       for (var id in data.reviews) {
         if (!Object.prototype.hasOwnProperty.call(data.reviews, id)) continue
         progress.reviews[id] = normalizeState(data.reviews[id])
+      }
+    }
+
+    if (data.activity && typeof data.activity === "object") {
+      for (var day in data.activity) {
+        if (!Object.prototype.hasOwnProperty.call(data.activity, day)) continue
+        progress.activity[day] = Math.max(0, Math.round(num(data.activity[day], 0)))
       }
     }
   } catch (e) {
@@ -814,6 +835,14 @@ function remainingToday(progress, now, newPerDay, reviewsPerDay) {
 // saves. Per card the newer `updated` wins, and a card only one side knows
 // about is kept. Answering the same card in two surfaces within one second is
 // not something a person can do, so ties keep `mine` and stay deterministic.
+//
+// `activity` merges by taking the larger of the two sides per day instead:
+// unlike a card's state, which is one fact with one owner at a time, a day's
+// frozen count is a plain number two surfaces could in principle have frozen
+// slightly differently. Both derive it from the same converged review data,
+// so in practice they agree and the max is a no-op — this only matters if
+// they do not, and picking the larger is the side more likely to have seen
+// the fuller picture.
 function mergeProgress(mine, theirs) {
   var out = {}
   var a = (mine && mine.reviews) || {}
@@ -829,7 +858,20 @@ function mergeProgress(mine, theirs) {
     if (!out[id] || t.updated > out[id].updated) out[id] = t
   }
 
-  return { reviews: out }
+  var activity = {}
+  var am = (mine && mine.activity) || {}
+  var at = (theirs && theirs.activity) || {}
+  var day
+  for (day in am) {
+    if (Object.prototype.hasOwnProperty.call(am, day)) activity[day] = Math.max(0, Math.round(num(am[day], 0)))
+  }
+  for (day in at) {
+    if (!Object.prototype.hasOwnProperty.call(at, day)) continue
+    var n = Math.max(0, Math.round(num(at[day], 0)))
+    activity[day] = Math.max(activity[day] || 0, n)
+  }
+
+  return { reviews: out, activity: activity }
 }
 
 function stateFor(progress, id) {
@@ -1021,6 +1063,99 @@ function deckStats(cards, progress, now, newPerDay, reviewsPerDay) {
   return out
 }
 
+// ---------------------------------------------------------------- activity
+//
+// A GitHub-style calendar of how many cards were answered per day. There is
+// no review log — see deckStats' note on retention — so a day's count can
+// only be read off the cards' current `updated` fields, and only until one
+// of those cards is answered again on a later day, at which point the old
+// day's share of it is gone for good: a card carries a single `updated`, not
+// a history. freezeActivity is what saves a day's count before that happens.
+
+// Answered that day, the same rule answeredToday already applies to today —
+// generalised to any day so a past one can be frozen with it too.
+function answeredOn(progress, day) {
+  var reviews = (progress && progress.reviews) || {}
+  var n = 0
+  for (var id in reviews) {
+    if (!Object.prototype.hasOwnProperty.call(reviews, id)) continue
+    var s = reviews[id]
+    if (s && s.updated > 0 && dayKey(s.updated) === day) n++
+  }
+  return n
+}
+
+// Writes today's answeredOn count into `activity` for every elapsed day that
+// does not have one yet, going back up to ACTIVITY_MAX_DAYS. Never freezes
+// today itself — it is still being written, and stays live until it, too,
+// has elapsed.
+//
+// Call this on every reload. With the shell running continuously that
+// freezes each day within a minute of its own rollover, before anything
+// could touch that day's cards again. Reopened after being closed across one
+// or more days, it catches up whichever of those it still can — any card
+// from an unfrozen day that has not yet been answered again still carries
+// that day's `updated`, so the count is still recoverable at that point.
+function freezeActivity(progress, now) {
+  var activity = {}
+  var existing = (progress && progress.activity) || {}
+  for (var k in existing) {
+    if (Object.prototype.hasOwnProperty.call(existing, k)) activity[k] = existing[k]
+  }
+
+  var today = dayKey(now)
+  for (var i = 1; i <= ACTIVITY_MAX_DAYS; i++) {
+    var day = dayKey(now - i * DAY)
+    if (day === today) continue
+    if (Object.prototype.hasOwnProperty.call(activity, day)) continue
+    activity[day] = answeredOn(progress, day)
+  }
+
+  return { reviews: (progress && progress.reviews) || {}, activity: activity }
+}
+
+// One more than the 52 weeks GitHub's own calendar shows, so the oldest
+// column a caller asks for is never a stray sliver of a 53rd week.
+var HEATMAP_WEEKS = 53
+
+// A GitHub-style grid: `weeks` columns of 7 rows, Sunday at the top and
+// Saturday at the bottom, the last column always ending on today. Flat and
+// column-major — index i is row (i % 7) of column (i / 7 | 0) — since that is
+// the order a Repeater wants and there is no reason to make QML redo the
+// arithmetic this already has to do once to place today correctly.
+//
+// A cell after today in the final column, or before the window's start in
+// the first, is null: nothing to plot, which a caller must not confuse with
+// a real day of zero activity. Today's count is derived live, since it is
+// still changing; every earlier day prefers whatever freezeActivity already
+// recorded, falling back to the same live derivation only for a day that has
+// not yet been through a reload since it ended.
+function heatmapGrid(progress, now, weeks) {
+  var todayDow = dayOfWeek(now)
+  var today = dayKey(now)
+  var activity = (progress && progress.activity) || {}
+  var out = []
+
+  for (var col = 0; col < weeks; col++) {
+    for (var row = 0; row < 7; row++) {
+      var offset = (weeks - 1 - col) * 7 + (todayDow - row)
+      if (offset < 0) {
+        out.push(null)
+        continue
+      }
+      if (offset === 0) {
+        out.push({ day: today, count: answeredOn(progress, today) })
+        continue
+      }
+      var day = dayKey(now - offset * DAY)
+      var count = Object.prototype.hasOwnProperty.call(activity, day) ? activity[day] : answeredOn(progress, day)
+      out.push({ day: day, count: count })
+    }
+  }
+
+  return out
+}
+
 // Put every suspended card back in the rotation. The leech mark is kept: the
 // card has been trouble and the statistics should go on saying so - what is
 // cleared is only the part that hides it.
@@ -1036,7 +1171,7 @@ function deckStats(cards, progress, now, newPerDay, reviewsPerDay) {
 // untouched card look newer than an answer somewhere else.
 function unsuspendAll(progress, now) {
   var reviews = (progress && progress.reviews) || {}
-  var out = { reviews: {} }
+  var out = { reviews: {}, activity: (progress && progress.activity) || {} }
   var restored = 0
 
   for (var id in reviews) {
@@ -1259,7 +1394,7 @@ function relativeToHome(path, home) {
 
 function serializeProgress(progress) {
   var p = progress || emptyProgress()
-  return JSON.stringify({ reviews: p.reviews || {} }) + "\n"
+  return JSON.stringify({ reviews: p.reviews || {}, activity: p.activity || {} }) + "\n"
 }
 
 // Both surfaces resolve their settings the same way, so the resolution lives
