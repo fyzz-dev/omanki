@@ -111,6 +111,7 @@ same restart clears it.
 | `space` / `enter` | Reveal the answer, then grade it Good |
 | `1` `2` `3` `4` | Again / Hard / Good / Easy |
 | `u` | Undo the last answer |
+| `p` | Replay the current face's audio, if it has any |
 | `s` | Statistics |
 | `←` `→` | Move between statistics tabs |
 | `h` `l` | Move between statistics tabs (bar panel only) |
@@ -237,6 +238,34 @@ file, so you can reorder the deck or fix a typo on the back without losing a
 card's history. Changing the front is deliberately a new card — the question
 changed, and the old schedule was earned answering a different one. Set an
 explicit `"id"` on a card if you want to edit a front and keep its progress.
+
+### Image and audio cards
+
+A card can add `frontImage`, `backImage`, `frontAudio`, and `backAudio` —
+each a **filename**, not a path, looked up in a `media/` folder next to the
+deck (`~/.local/share/omanki/media/` for the default deck path). A card can
+mix and match any of the four:
+
+```json
+{ "front": "Number 12", "back": "tin, ton, den", "frontAudio": "12-tin.ogg", "tags": ["major-system"] }
+{ "front": "Who is this?", "back": "Alice Chen", "frontImage": "alice.jpg" }
+```
+
+Front audio plays once the card appears; back audio, once you reveal the
+answer. `p`, or the speaker icon in the card's corner, replays whichever face
+is currently showing. The icon only appears on a face that actually has a
+recording — a plain text card shows nothing there and stays silent.
+
+Since the `front` you type is still what identifies the card (see above), a
+deck of faces or sounds needs a `front` that actually distinguishes them —
+`"Who is this?"` repeated on every card would collide. Give each one something
+unique, or set an explicit `"id"`.
+
+A field that is not a plain filename — a path with a `/` in it, `.`, `..`, or
+anything that does not resolve to a real file inside `media/` — is dropped on
+its own rather than failing the whole card: the card still shows, just without
+that image or clip. There is no way to author these from the `a` composer yet;
+write them into the deck by hand.
 
 Scheduling progress is kept separately, in
 `~/.local/state/omarchy/omanki.json`, so nothing the plugin writes can clobber
@@ -414,10 +443,12 @@ widget, so a key added to an existing entry needs `omarchy restart shell`.
 
 ## Requirements
 
-Omarchy 4 (Quattro) or newer. No external dependencies, no packages to
-install, no network access, and no privileged operations — the plugin is QML
-and JavaScript running inside the existing `omarchy-shell` process, and uses
-only the shell's own `qs.Ui` and `qs.Commons` modules.
+Omarchy 4 (Quattro) or newer. No network access and no privileged operations —
+the plugin is QML and JavaScript running inside the existing `omarchy-shell`
+process, and uses only the shell's own `qs.Ui` and `qs.Commons` modules.
+Audio cards additionally need the `QtMultimedia` QML module (the
+`qt6-multimedia` package), which ships with Omarchy's own Quickshell; text and
+image cards need nothing beyond the base install.
 
 `node` is needed to run the test suite, but never to use the plugin.
 
@@ -473,6 +504,16 @@ markup — which would let a crafted card make the shell load remote or local
 resources. The parser deliberately does **not** strip markup: a card teaching
 HTML should survive intact, so safety belongs to the renderer.
 
+A card's `frontImage`/`backImage`/`frontAudio`/`backAudio` are filenames, not
+paths, and are only ever handed to `Image` or a `MediaPlayer` as the resolved
+absolute path MEDIA_VALIDATE_SH hands back — never as the raw filename from
+the deck. That script walks to the deck's `media/` directory with the same
+symlink-refusing, ownership-checking discipline as READ_SH/WRITE_SH, pins it,
+and only then resolves filenames inside it, refusing anything that is a
+symlink itself or that would resolve outside the pinned directory. It runs
+once per deck load — every filename any card refers to, in one call — rather
+than once per card shown.
+
 ## Remove
 
 ```bash
@@ -501,6 +542,15 @@ answering late and the order the three passing grades keep, lapses at every
 setting and the recovery from them, leeches and restoring them, the clamps,
 deck parsing, an oversized deck being reported as such, queue order, the 4am
 rollover, document merging, and the hardening on both file-I/O snippets.
+
+```bash
+node tests/media.test.mjs
+```
+
+Covers parsing a card's media fields, refusing anything that is not a plain
+filename, and MEDIA_VALIDATE_SH's own hardening — a symlink at the media
+directory or at a file inside it, and traversal attempts — run as real `sh`
+against real directories the same way READ_SH and WRITE_SH are.
 
 Those tests are pure: they know nothing about processes, files, or two
 surfaces being open at once. Every bug this plugin has actually shipped lived
@@ -544,7 +594,7 @@ write, so a fixed sleep tests the machine's mood rather than the plugin.
 
 | File | What it is |
 |------|------------|
-| `Anki.js` | Scheduling, deck parsing, settings, file I/O snippets. No QML types. |
+| `Anki.js` | Scheduling, deck parsing, settings, file I/O and media-validation snippets. No QML types. |
 | `Reviewer.qml` | The session: deck, progress, queue, persistence, card face. |
 | `GradeButtons.qml` | The four priced grade buttons, shared by both surfaces. |
 | `CardComposer.qml` | The add-a-card form behind `a`, in the overlay only. |

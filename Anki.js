@@ -468,6 +468,17 @@ function text(value) {
   return value === undefined || value === null ? "" : String(value).trim()
 }
 
+// A media reference is a bare filename, looked up inside the deck's media
+// directory — never a path. Anything with a separator, or `.`/`..`, is
+// refused rather than partially trusted: a deck is as untrusted as any other
+// file this plugin reads, and a media field is exactly the kind of thing a
+// shared deck would use to try to point outside its own folder.
+function isMediaFilename(value) {
+  var v = text(value)
+  if (!v || v === "." || v === "..") return false
+  return v.indexOf("/") === -1 && v.indexOf("\\") === -1
+}
+
 // The read cap counts bytes, and a deck of accented or CJK text spends more
 // bytes than it has characters, so asking the string for its length would
 // under-count exactly the decks most likely to be near the limit.
@@ -534,11 +545,70 @@ function parseDeck(raw) {
       id: id,
       front: front,
       back: back,
-      tags: Array.isArray(entry.tags) ? entry.tags.map(text).filter(Boolean) : []
+      tags: Array.isArray(entry.tags) ? entry.tags.map(text).filter(Boolean) : [],
+      // Media is additive and optional: a plain filename in the deck's media
+      // directory (see mediaDirFor), never a path. Anything else is dropped
+      // rather than failing the whole card — a bad media field should not
+      // cost a card its schedule.
+      frontImage: isMediaFilename(entry.frontImage) ? text(entry.frontImage) : "",
+      backImage: isMediaFilename(entry.backImage) ? text(entry.backImage) : "",
+      frontAudio: isMediaFilename(entry.frontAudio) ? text(entry.frontAudio) : "",
+      backAudio: isMediaFilename(entry.backAudio) ? text(entry.backAudio) : ""
     })
   }
 
   return { cards: cards, error: "" }
+}
+
+// The distinct media filenames a deck's cards refer to, in a stable order —
+// what gets sent to MEDIA_VALIDATE_SH, once per deck load rather than once
+// per card.
+var MEDIA_FIELDS = ["frontImage", "backImage", "frontAudio", "backAudio"]
+
+function collectMediaFilenames(cards) {
+  var seen = {}
+  var out = []
+  var list = cards || []
+  for (var i = 0; i < list.length; i++) {
+    for (var f = 0; f < MEDIA_FIELDS.length; f++) {
+      var name = list[i][MEDIA_FIELDS[f]]
+      if (name && !seen[name]) {
+        seen[name] = true
+        out.push(name)
+      }
+    }
+  }
+  return out
+}
+
+// Folds MEDIA_VALIDATE_SH's answer back onto the cards: each card gets a
+// `<field>Path` alongside its `<field>` filename, holding the validated
+// absolute path or "" when the filename was missing, unsafe, or never asked
+// about. Reviewer.qml renders only these — never the raw filename — so a
+// path that was not vetted can never reach an Image or a MediaPlayer.
+function attachMediaPaths(cards, pathByName) {
+  var map = pathByName || {}
+  var list = cards || []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var card = list[i]
+    var copy = {}
+    for (var k in card) copy[k] = card[k]
+    for (var f = 0; f < MEDIA_FIELDS.length; f++) {
+      var field = MEDIA_FIELDS[f]
+      var name = card[field]
+      copy[field + "Path"] = (name && map[name]) ? map[name] : ""
+    }
+    out.push(copy)
+  }
+  return out
+}
+
+// Sibling to the deck file, the way `media/` sits next to a note file in
+// other systems. Filenames in the deck are resolved relative to this, never
+// to an arbitrary path.
+function mediaDirFor(deckPath) {
+  return dirOf(deckPath) + "/media"
 }
 
 // A tag is written twice — once in the deck, once in shell.json — and those
@@ -1104,6 +1174,67 @@ var WRITE_SH = [
   'chmod 600 "$t" || { rm -f "$t"; exit 72; }',
   'cat > "$t" || { rm -f "$t"; exit 73; }',
   'mv -f "$t" "/proc/self/fd/9/$name" || { rm -f "$t"; exit 74; }'
+].join("\n")
+
+// Validates media filenames against the deck's media directory, in one call
+// rather than one per card per render. Given HOME, the media directory
+// relative to HOME, and a list of candidate filenames — one per line on
+// stdin, kept off argv the same way WRITE_SH keeps the document off it — it
+// walks to the media directory with the same symlink-refusing, ownership-
+// checking discipline as READ_SH/WRITE_SH, pins it, then for each filename
+// prints either the file's real path (if it resolves safely inside the
+// pinned directory) or a blank line. Blank lines matter as much as filled
+// ones: they are matched back up to the filenames by position, so the count
+// of lines out must always equal the count of names in.
+//
+// A missing or unsafe media directory exits before reading stdin at all — no
+// media is valid when there is nowhere safe to look for it — which the
+// caller reads as "every filename is invalid" from getting fewer lines back
+// than it asked about, the same way it already tolerates a truncated read.
+//
+// $1 = HOME, $2 = media directory relative to HOME.
+var MEDIA_VALIDATE_SH = [
+  WALK_SH,
+  'd="$base"',
+  'IFS="/"',
+  'for c in $dir; do',
+  '  [ -n "$c" ] || continue',
+  '  d="$d/$c"',
+  '  [ -L "$d" ] && exit 65',
+  '  [ -e "$d" ] || exit 0',
+  '  [ -d "$d" ] || exit 65',
+  '  [ -O "$d" ] || exit 65',
+  'done',
+  'unset IFS',
+  // The media directory itself is the final path component, checked the same
+  // way as everything above it before it is pinned — unlike READ_SH/WRITE_SH,
+  // which pin a file's *parent*, this pins the directory filenames resolve
+  // inside of.
+  'm="$d/$name"',
+  '[ -L "$m" ] && exit 65',
+  '[ -e "$m" ] || exit 0',
+  '[ -d "$m" ] || exit 65',
+  '[ -O "$m" ] || exit 65',
+  'd="$m"',
+  PIN_SH,
+  'while IFS= read -r name || [ -n "$name" ]; do',
+  '  case "$name" in',
+  '    ""|*/*|*\\\\*|.|..)',
+  '      echo ""',
+  '      continue',
+  '      ;;',
+  '  esac',
+  '  f="/proc/self/fd/9/$name"',
+  '  if [ -L "$f" ] || [ ! -f "$f" ]; then',
+  '    echo ""',
+  '    continue',
+  '  fi',
+  '  rp=$(readlink -f "$f" 2>/dev/null) || { echo ""; continue; }',
+  '  case "$rp" in',
+  '    "$d"/*) echo "$rp" ;;',
+  '    *) echo "" ;;',
+  '  esac',
+  'done'
 ].join("\n")
 
 // Is `path` inside `home`, and where? Returns the path relative to home, or ""

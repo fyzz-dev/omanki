@@ -1,4 +1,5 @@
 import QtQuick
+import QtMultimedia
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -23,6 +24,11 @@ Item {
   readonly property string deckRel: Anki.relativeToHome(root.deckPath, root.home)
   readonly property string progressRel:
       Anki.relativeToHome(root.stateDir + "/omanki.json", root.home)
+
+  // Where media filenames on a card resolve to. Same containment rule as the
+  // deck and progress files: outside home, nothing in it is trusted.
+  readonly property string mediaDir: Anki.mediaDirFor(root.deckPath)
+  readonly property string mediaRel: Anki.relativeToHome(root.mediaDir, root.home)
   property int newPerDay: 20
   // 0 means no cap. A limit you have not set should not be a limit of nothing.
   property int reviewsPerDay: 0
@@ -194,6 +200,36 @@ Item {
     if (root.phase === "reviewing") root.revealed = true
   }
 
+  // Front audio plays once a new card is on screen; back audio, once the
+  // answer is revealed. Neither is forced on the user beyond that first play:
+  // `p` calls this again for whichever face is currently showing.
+  onCurrentChanged: {
+    frontPlayer.stop()
+    backPlayer.stop()
+    if (root.current && root.current.frontAudioPath) frontPlayer.play()
+  }
+
+  onRevealedChanged: {
+    if (root.revealed && root.current && root.current.backAudioPath) backPlayer.play()
+  }
+
+  function replayAudio() {
+    if (root.revealed && root.current && root.current.backAudioPath) backPlayer.play()
+    else if (root.current && root.current.frontAudioPath) frontPlayer.play()
+  }
+
+  MediaPlayer {
+    id: frontPlayer
+    audioOutput: AudioOutput {}
+    source: root.current && root.current.frontAudioPath ? "file://" + root.current.frontAudioPath : ""
+  }
+
+  MediaPlayer {
+    id: backPlayer
+    audioOutput: AudioOutput {}
+    source: root.current && root.current.backAudioPath ? "file://" + root.current.backAudioPath : ""
+  }
+
   // Space and Enter mean "show me the answer", then "I knew it" — the same two
   // presses Anki trains into your hands.
   function activate() {
@@ -321,10 +357,12 @@ Item {
     // by not restarting it.
     root.deckRead = false
     root.progressRead = false
+    root.mediaRead = false
     if (!root.checkPaths()) {
       root.deck = []
       root.deckRead = true
       root.progressRead = true
+      root.mediaRead = true
       root.loaded = true
       root.rebuild()
       return
@@ -335,11 +373,14 @@ Item {
 
   property bool deckRead: false
   property bool progressRead: false
+  property bool mediaRead: false
+  property var mediaFilenames: []
 
-  // The queue needs both files, and the two reads finish in whichever order
-  // they finish, so building it waits for the pair.
+  // The queue needs all three: both files, and — only when the deck actually
+  // references any — the media validation pass. They finish in whichever
+  // order they finish, so building it waits for the lot.
   function readFinished() {
-    if (!root.deckRead || !root.progressRead) return
+    if (!root.deckRead || !root.progressRead || !root.mediaRead) return
     root.loaded = true
     root.rebuild()
   }
@@ -361,6 +402,55 @@ Item {
           root.deckError = parsed.error
         }
         root.deckRead = true
+
+        // Only spun up when the deck actually points at media, and only when
+        // there is somewhere safe to look for it — the same file this deck
+        // came from could sit outside home in a broken config, and refusing
+        // that path is checkPaths' job, not this one's.
+        var names = Anki.collectMediaFilenames(root.deck)
+        if (!names.length || !root.mediaRel) {
+          root.mediaRead = true
+        } else {
+          root.mediaFilenames = names
+          // Reopened for every run, the same reason writer/merger do: a
+          // Process keeps stdinEnabled across runs, and onStarted below turns
+          // it off to signal EOF — without resetting it here, every reload
+          // after the first starts this script with stdin already closed, so
+          // it reads no filenames and every media path silently goes blank.
+          mediaValidator.stdinEnabled = true
+          mediaValidator.running = true
+        }
+        root.readFinished()
+      }
+    }
+  }
+
+  // One batched validation per deck load rather than one process per card per
+  // render: every filename any card refers to is sent down at once, and the
+  // answers come back matched to them by position. See MEDIA_VALIDATE_SH.
+  Process {
+    id: mediaValidator
+    command: ["sh", "-c", Anki.MEDIA_VALIDATE_SH, "omanki-media", root.home, root.mediaRel]
+    stdinEnabled: true
+    onStarted: {
+      var names = root.mediaFilenames
+      write(names.length ? names.join("\n") + "\n" : "")
+      stdinEnabled = false
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var lines = text.length ? text.split("\n") : []
+        if (lines.length && lines[lines.length - 1] === "") lines.pop()
+
+        var map = {}
+        var names = root.mediaFilenames
+        for (var i = 0; i < names.length && i < lines.length; i++) {
+          if (lines[i]) map[names[i]] = lines[i]
+        }
+
+        root.deck = Anki.attachMediaPaths(root.deck, map)
+        root.mediaRead = true
         root.readFinished()
       }
     }
@@ -584,6 +674,16 @@ Item {
         width: parent.width - Style.spacing.lg * 2
         spacing: Style.spacing.md
 
+        Image {
+          width: parent.width
+          height: Math.min(implicitHeight, Style.space(240))
+          fillMode: Image.PreserveAspectFit
+          asynchronous: true
+          cache: false
+          visible: !!(root.current && root.current.frontImagePath)
+          source: root.current && root.current.frontImagePath ? "file://" + root.current.frontImagePath : ""
+        }
+
         Text {
           textFormat: Text.PlainText
           width: parent.width
@@ -602,6 +702,16 @@ Item {
           height: Math.max(1, Style.space(1))
           visible: root.revealed
           color: Util.alpha(root.foreground, 0.15)
+        }
+
+        Image {
+          width: parent.width
+          height: Math.min(implicitHeight, Style.space(240))
+          fillMode: Image.PreserveAspectFit
+          asynchronous: true
+          cache: false
+          visible: root.revealed && !!(root.current && root.current.backImagePath)
+          source: root.revealed && root.current && root.current.backImagePath ? "file://" + root.current.backImagePath : ""
         }
 
         Text {
@@ -626,6 +736,51 @@ Item {
           opacity: 0.35
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
+        }
+      }
+
+      // The only sign a face has audio at all: a clip that autoplays and
+      // finishes in under a second leaves nothing else to notice it by.
+      // Doubles as a replay button, the mouse's equivalent of `p`. Anchored
+      // to the card's own corners rather than sitting in the text column, so
+      // it reads as a badge on the card and not as another line of content.
+      Text {
+        textFormat: Text.PlainText
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: Style.spacing.md
+        visible: !!(root.current && root.current.frontAudioPath)
+        text: "󰕾"
+        color: root.foreground
+        opacity: 0.5
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.subtitle
+
+        MouseArea {
+          anchors.fill: parent
+          anchors.margins: Style.space(-6)
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.replayAudio()
+        }
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.margins: Style.spacing.md
+        visible: root.revealed && !!(root.current && root.current.backAudioPath)
+        text: "󰕾"
+        color: root.accent
+        opacity: 0.5
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.subtitle
+
+        MouseArea {
+          anchors.fill: parent
+          anchors.margins: Style.space(-6)
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.replayAudio()
         }
       }
     }

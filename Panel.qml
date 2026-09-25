@@ -160,6 +160,7 @@ Panel {
         else if (k === "3") reviewer.answer("good")
         else if (k === "4") reviewer.answer("easy")
         else if (k === "u") reviewer.undo()
+        else if (k === "p") reviewer.replayAudio()
       }
 
       Column {
