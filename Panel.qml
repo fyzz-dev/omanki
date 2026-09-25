@@ -266,6 +266,7 @@ Panel {
           width: parent.width
           visible: root.mode === "stats"
           stats: reviewer.deckStats
+          heatmap: reviewer.heatmap
           tab: root.statsTab
           foreground: root.foreground
           accent: Color.accent

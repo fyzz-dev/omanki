@@ -154,9 +154,10 @@ been answering the same deck.
 
 `s` on either surface, `a` in the overlay.
 
-Both surfaces use the same **tabs** — `DECK`, `DUE`, `TODAY`, and `LEECHES`
-once there is a leech to show — walked with `←` and `→`, or clicked. Same names
-and same order on both, because two surfaces should not be two things to learn.
+Both surfaces use the same **tabs** — `DECK`, `DUE`, `TODAY`, `ACTIVITY`, and
+`LEECHES` once there is a leech to show — walked with `←` and `→`, or clicked.
+Same names and same order on both, because two surfaces should not be two
+things to learn.
 
 They arrived there for different reasons. The panel is about a card wide, where
 one page would be a column of squeezed rows saying everything badly. The
@@ -182,10 +183,23 @@ presentations rather than two of either.
 what falls due over the next seven days, and today's figures. Today leads with
 the one number and gives its parts underneath: `answered` is `reviews + new` by
 construction, so showing all three as peers was three numbers carrying two
-facts. Everything is derived from the cards themselves; the plugin keeps no
-review log, so *retention* is a lifetime figure per card (answers that never
-had to be relearned) rather than Anki's rolling window, and the view says so
-rather than letting the number be misread.
+facts. Retention is a lifetime figure per card (answers that never had to be
+relearned) rather than Anki's rolling window, and the view says so rather than
+letting the number be misread — a card's schedule has no history behind it
+beyond its own current state, so a rolling window is not something this can
+compute.
+
+**Activity** is a GitHub-style calendar of cards answered per day, as many
+trailing weeks as the surface has room for — a dozen or so in the bar panel,
+up to a year in the overlay. There is genuinely no review log behind this
+either: today's column is worked out fresh every time from the cards
+themselves, the same way the `TODAY` tab's numbers are, and once a day ends
+that figure is written down once and never touched again — a card answered
+again later moves *its own* latest-answered date forward, which would
+otherwise quietly erase the old day's share of the count if it were not
+already saved. This also means the calendar can only go back as far as this
+feature has existed on your deck: it starts empty and fills in from here,
+rather than claiming a history it never kept.
 
 **Leeches** appear in both, but only once there are any — a deck without them
 says nothing about them, and in the panel the tab itself stays away. You get
@@ -457,7 +471,11 @@ image cards need nothing beyond the base install.
 Worth knowing before you point this at your notes.
 
 **`~/.local/state/omarchy/omanki.json`** — scheduling progress, written on
-every answer. Entirely the plugin's own file.
+every answer. Entirely the plugin's own file. Alongside each card's schedule
+it also carries `activity`, a small per-day tally that only exists to draw
+the `ACTIVITY` tab's calendar — see [Statistics and adding
+cards](#statistics-and-adding-cards) for why a review log would otherwise be
+needed and isn't.
 
 **`~/.local/share/omanki/cards.json`** — your deck. Only ever appended to, and
 only when you add a card through the `a` composer. If you never use it, the
@@ -552,6 +570,16 @@ filename, and MEDIA_VALIDATE_SH's own hardening — a symlink at the media
 directory or at a file inside it, and traversal attempts — run as real `sh`
 against real directories the same way READ_SH and WRITE_SH are.
 
+```bash
+node tests/heatmap.test.mjs
+```
+
+Covers the `ACTIVITY` tab's arithmetic: freezing a day's count before a card
+answered again could quietly erase it, never freezing today or a day already
+frozen, placing today at its real weekday in the grid with every day after it
+left null rather than invented, and merging two documents' activity by the
+larger side per day.
+
 Those tests are pure: they know nothing about processes, files, or two
 surfaces being open at once. Every bug this plugin has actually shipped lived
 in that gap and survived a green suite — a writer that silently dropped every
@@ -594,7 +622,7 @@ write, so a fixed sleep tests the machine's mood rather than the plugin.
 
 | File | What it is |
 |------|------------|
-| `Anki.js` | Scheduling, deck parsing, settings, file I/O and media-validation snippets. No QML types. |
+| `Anki.js` | Scheduling, deck parsing, settings, file I/O, media-validation, and activity-heatmap logic. No QML types. |
 | `Reviewer.qml` | The session: deck, progress, queue, persistence, card face. |
 | `GradeButtons.qml` | The four priced grade buttons, shared by both surfaces. |
 | `CardComposer.qml` | The add-a-card form behind `a`, in the overlay only. |

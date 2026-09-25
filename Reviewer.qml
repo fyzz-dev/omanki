@@ -131,6 +131,12 @@ Item {
   readonly property var deckStats:
       Anki.deckStats(root.cards, root.progress, root.now, root.newPerDay, root.reviewsPerDay)
 
+  // The full year, flat and column-major (see Anki.heatmapGrid) — always
+  // computed at its full width. A surface with room for fewer weeks takes as
+  // many trailing columns (7 cells each) as it can show; slicing off the end
+  // of a column-major array is exactly slicing off the most recent weeks.
+  readonly property var heatmap: Anki.heatmapGrid(root.progress, root.now, Anki.HEATMAP_WEEKS)
+
   signal graded(string grade)
   signal cardAdded()
 
@@ -274,7 +280,7 @@ Item {
     }]).slice(-Anki.UNDO_DEPTH)
 
     reviews[id] = after
-    root.progress = { reviews: reviews }
+    root.progress = { reviews: reviews, activity: root.progress.activity }
 
     root.answered++
     root.save()
@@ -323,7 +329,7 @@ Item {
     restored.updated = root.now
     reviews[last.id] = restored
 
-    root.progress = { reviews: reviews }
+    root.progress = { reviews: reviews, activity: root.progress.activity }
     root.answered = Math.max(0, root.answered - 1)
     root.save()
 
@@ -462,8 +468,17 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        root.progress = Anki.parseProgress(text)
+        var parsed = Anki.parseProgress(text)
+        var frozen = Anki.freezeActivity(parsed, root.now)
+        root.progress = frozen
         root.progressRead = true
+
+        // Only elapsed days get frozen, so this fires at most once per day —
+        // every other load finds nothing new and this is a no-op. See
+        // freezeActivity for why it has to run here, at load, rather than
+        // waiting for the next answer to save it incidentally.
+        if (Object.keys(frozen.activity).length > Object.keys(parsed.activity).length) root.save()
+
         root.readFinished()
       }
     }
